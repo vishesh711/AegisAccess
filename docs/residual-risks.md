@@ -18,7 +18,7 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 10. **Detection metrics** are computed on a 33-row hand-labelled synthetic fixture; they say nothing
     about real-world performance.
 11. **GitHub Actions** are pinned by version tag, not commit SHA (SHAs were not verifiable offline here).
-12. **Container scan** in CI is report-only; it was not run in the build environment (see `BLOCKERS.md`).
+12. **Container scan** in CI is report-only: findings are reported but do not fail the build.
 13. **Single-use approval workflow** (MCP_SPEC approval rule, PRD replay scenario P1) is not implemented,
     so no tool requires approval and no approval can be replayed.
 14. **Caller-supplied correlation id.** The MCP server accepts `Aegis-Correlation-Id` (UUID-validated) so an

@@ -95,6 +95,7 @@ artifacts/                 security-test-report.md, verification/ (per-milestone
 
 ## Documentation
 
+* **[Complete project guide with diagrams](docs/PROJECT_GUIDE.md)** — start here
 * [Architecture](docs/architecture.md) · [STRIDE threat model](docs/threat-model.md) ·
   [Security design review / ADRs](docs/security-design-review.md) · [Residual risks](docs/residual-risks.md)
 * [Implementation plan](PLAN.md) · [Blockers](BLOCKERS.md) · [Security test report](artifacts/security-test-report.md)
