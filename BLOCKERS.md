@@ -6,7 +6,7 @@ here is claimed as working.
 | Item | Status | Detail |
 |---|---|---|
 | GitHub Actions CI (`.github/workflows/ci.yml`) | **Not executed** | Written and every step was run locally with the same `make` targets, but the workflow itself has not run on GitHub-hosted runners from this environment. |
-| Container image vulnerability scan (Trivy) | **Not executed** | Trivy needs its vulnerability DB from `ghcr.io`, which the sandbox egress proxy does not allow. CI step is report-only. `pip-audit` on the hashed lockfile **was** run: no known vulnerabilities. |
+| Container image vulnerability scan (Trivy) | **Not executed** | Trivy needs its vulnerability DB from `ghcr.io`, which the sandbox egress proxy does not allow. CI runs the digest-pinned `aquasec/trivy:0.58.1` image, report-only (the first CI run failed because the `aquasecurity/trivy-action@0.28.0` tag I wrote does not exist). `pip-audit` on the hashed lockfile **was** run: no known vulnerabilities. |
 | Keycloak image source | Deviation | `quay.io` is blocked by the sandbox proxy, so the Docker Hub image `keycloak/keycloak:26.2.5` (published by the Keycloak project) is used, pinned by digest. |
 | Image build in the sandbox | Environment-specific | Building needed `AEGIS_BUILD_NETWORK=host AEGIS_BUILD_HTTPS_PROXY=$HTTPS_PROXY AEGIS_EXTRA_CA=<proxy CA>`. On a normal workstation/CI none of these are needed (defaults). |
 | Docker daemon | Environment-specific | The sandbox had no running daemon; it was started manually with `dockerd`. |

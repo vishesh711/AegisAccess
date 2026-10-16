@@ -40,8 +40,16 @@ def test_runtime_role_cannot_mutate_audit(app_conn: psycopg.Connection, sql: str
 
 
 def test_even_owner_cannot_mutate_audit_rows() -> None:
+    # Self-contained: write an event as the runtime role first (works on a fresh database too).
+    event_id = uuid.uuid4()
+    with psycopg.connect(APP_DSN, autocommit=True) as app:
+        app.execute(
+            "INSERT INTO audit_events (id, event_kind, correlation_id, request_id, decision, reason_code,"
+            " evaluator_status) VALUES (%s, 'authn', %s, %s, 'deny', 'TEST_EVENT', 'not_evaluated')",
+            (event_id, uuid.uuid4(), uuid.uuid4()),
+        )
     with psycopg.connect(OWNER_DSN, autocommit=True) as conn:
-        assert conn.execute("SELECT count(*) FROM audit_events").fetchone()[0] > 0  # type: ignore[index]
+        assert conn.execute("SELECT count(*) FROM audit_events WHERE id = %s", (event_id,)).fetchone()[0] == 1  # type: ignore[index]
         with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
             conn.execute("UPDATE audit_events SET reason_code = 'X'")
         with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
