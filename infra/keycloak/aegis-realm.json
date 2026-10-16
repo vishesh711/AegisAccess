@@ -1,0 +1,325 @@
+{
+  "realm": "aegis",
+  "enabled": true,
+  "displayName": "AegisAccess DEMO (synthetic identities only)",
+  "sslRequired": "none",
+  "accessTokenLifespan": 300,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "failureFactor": 30,
+  "permanentLockout": false,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "clients": [
+    {
+      "clientId": "aegis-cli",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {
+        "post.logout.redirect.uris": ""
+      },
+      "protocolMappers": [
+        {
+          "name": "aud-aegis-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "aegis-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "aegis-cli-short",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {
+        "post.logout.redirect.uris": "",
+        "access.token.lifespan": "2"
+      },
+      "protocolMappers": [
+        {
+          "name": "aud-aegis-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "aegis-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "aegis-other-app",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {
+        "post.logout.redirect.uris": ""
+      },
+      "protocolMappers": [
+        {
+          "name": "aud-other-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "other-service",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "svc-reporter",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dummy-svc-reporter-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "aud-aegis-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "aegis-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "agent-alpha",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dummy-agent-alpha-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "aud-aegis-mcp",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "aegis-mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "agent-beta",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dummy-agent-beta-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "aud-aegis-mcp",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "aegis-mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "11111111-1111-4111-8111-000000000001",
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Demo",
+      "email": "alice@alpha.example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-demo-pw",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000002",
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Demo",
+      "email": "bob@alpha.example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob-demo-pw",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000003",
+      "username": "carol",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Demo",
+      "email": "carol@beta.example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "carol-demo-pw",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000004",
+      "username": "secadmin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sec",
+      "lastName": "Demo",
+      "email": "secadmin@alpha.example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "secadmin-demo-pw",
+          "temporary": false
+        },
+        {
+          "type": "otp",
+          "userLabel": "demo-totp",
+          "secretData": "{\"value\": \"aegis-demo-otp-secret-dummy01\"}",
+          "credentialData": "{\"subType\": \"totp\", \"digits\": 6, \"counter\": 0, \"period\": 30, \"algorithm\": \"HmacSHA1\"}"
+        }
+      ]
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000005",
+      "username": "dave",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Dave",
+      "lastName": "Demo",
+      "email": "dave@alpha.example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dave-demo-pw",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000006",
+      "username": "eve",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Eve",
+      "lastName": "Demo",
+      "email": "eve@unprovisioned.example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "eve-demo-pw",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000101",
+      "username": "service-account-svc-reporter",
+      "enabled": true,
+      "serviceAccountClientId": "svc-reporter"
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000102",
+      "username": "service-account-agent-alpha",
+      "enabled": true,
+      "serviceAccountClientId": "agent-alpha"
+    },
+    {
+      "id": "11111111-1111-4111-8111-000000000103",
+      "username": "service-account-agent-beta",
+      "enabled": true,
+      "serviceAccountClientId": "agent-beta"
+    }
+  ]
+}
