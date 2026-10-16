@@ -21,6 +21,9 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 12. **Container scan** in CI is report-only; it was not run in the build environment (see `BLOCKERS.md`).
 13. **Single-use approval workflow** (MCP_SPEC approval rule, PRD replay scenario P1) is not implemented,
     so no tool requires approval and no approval can be replayed.
+14. **Caller-supplied correlation id.** The MCP server accepts `Aegis-Correlation-Id` (UUID-validated) so an
+    agent run can be traced end to end. It never affects authorization, but a malicious agent could reuse
+    another run's id to muddy correlation; `request_id` is always server-generated.
 
 ## Deferred (Phase 2, per PRD §12)
 Go gateway; OAuth token exchange with `act` claims; human approval workflow with nonce and argument
