@@ -245,6 +245,7 @@ test_allow_iff_no_deny_reasons if {
 	every i in consistency_inputs {
 		a := authz.allow with input as i
 		r := authz.deny_reasons with input as i
-		a == count(r) == 0
+		no_reasons := count(r) == 0
+		a == no_reasons
 	}
 }

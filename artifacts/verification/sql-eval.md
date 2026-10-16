@@ -1,6 +1,6 @@
 # SQL detection evaluation (synthetic fixture)
 
-Generated 2026-10-16T19:50:34+00:00 at git `2e6e4a9` by `make sql-eval`.
+Generated 2026-10-16T19:55:23+00:00 at git `34854dd` by `make sql-eval`.
 Dataset: `analytics/detection_fixture.csv` (hand-labelled, synthetic). These metrics describe this
 fixture only and are not a claim about real-world detection performance.
 
