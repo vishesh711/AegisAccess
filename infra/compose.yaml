@@ -1,0 +1,124 @@
+# AegisAccess local demo stack. All ports bind to 127.0.0.1 only. Synthetic data, dummy secrets.
+name: aegisaccess
+
+x-app-env: &app-env
+  AEGIS_ENV: local
+  AEGIS_DATABASE_URL: postgresql://aegis_app:${AEGIS_APP_PASSWORD:-dummy-aegis-app-pw}@postgres:5432/aegis
+  AEGIS_OIDC_ISSUER: http://localhost:8080/realms/aegis
+  AEGIS_OIDC_DISCOVERY_BASE: http://keycloak:8080/realms/aegis
+  AEGIS_OPA_URL: http://opa:8181
+  AEGIS_OPA_TOKEN: ${OPA_TOKEN:-dummy-opa-pep-token}
+  AEGIS_POLICY_VERSION: policy-v1
+  AEGIS_MCP_URL: http://mcp-server:8001/mcp
+  AEGIS_MCP_RESOURCE_URL: http://localhost:8001/mcp
+  AEGIS_AGENT_CLIENT_SECRET: ${AGENT_ALPHA_CLIENT_SECRET:-dummy-agent-alpha-secret}
+
+services:
+  postgres:
+    image: postgres:16.4-alpine@sha256:5660c2cbfea50c7a9127d17dc4e48543eedd3d7a41a595a2dfa572471e37e64c
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-dummy-postgres-superuser-pw}
+      POSTGRES_DB: postgres
+      AEGIS_OWNER_PASSWORD: ${AEGIS_OWNER_PASSWORD:-dummy-aegis-owner-pw}
+      AEGIS_APP_PASSWORD: ${AEGIS_APP_PASSWORD:-dummy-aegis-app-pw}
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aegis"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: keycloak/keycloak:26.2.5@sha256:4883630ef9db14031cde3e60700c9a9a8eaf1b5c24db1589d6a2d43de38ba2a9
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-dummy-keycloak-admin-pw}
+      # Fixed public issuer so tokens carry the same `iss` whether fetched from the host or from
+      # inside the compose network; back-channel endpoints (JWKS) follow the request host.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./keycloak/aegis-realm.json:/opt/keycloak/data/import/aegis-realm.json:ro
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  opa:
+    image: openpolicyagent/opa:1.4.2-static@sha256:3c995dc8a59f6ddfd92eb7404d2f7ff9fe71cd025d9251199957a8a6afbfd76e
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --authentication=token
+      - --authorization=basic
+      - --ignore=*_test.rego
+      - /policies
+    healthcheck:
+      test: ["CMD", "/opa", "version"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      AEGIS_OPA_TOKEN: ${OPA_TOKEN:-dummy-opa-pep-token}
+    volumes:
+      - ../policies:/policies:ro
+    ports: ["127.0.0.1:8181:8181"]
+
+  api:
+    build: &build
+      context: ..
+      dockerfile: Dockerfile
+      network: ${AEGIS_BUILD_NETWORK:-default}
+      args:
+        HTTPS_PROXY: ${AEGIS_BUILD_HTTPS_PROXY:-}
+      secrets: [extra_ca]
+    image: aegisaccess-app:local
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      opa: {condition: service_healthy}
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  mcp-server:
+    image: aegisaccess-app:local
+    command: ["uvicorn", "aegis_mcp.server:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8001", "--no-server-header"]
+    environment:
+      <<: *app-env
+      AEGIS_ENABLE_TEST_TOOLS: "true"
+    depends_on:
+      api: {condition: service_started}
+    ports: ["127.0.0.1:8001:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+secrets:
+  extra_ca:
+    file: ../.build/extra-ca.crt
+
+volumes:
+  pgdata:
