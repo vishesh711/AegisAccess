@@ -84,7 +84,8 @@ def test_t07_missing_or_invalid_delegation(
         {"resource_id": "doc-alpha-eng"},
     )
     effects = db.side_effects(mark)
-    reasons = {e["reason_code"] for e in db.audit_since(since) if e["decision"] == "deny"}
+    deny_rows = [e for e in db.audit_since(since) if e["decision"] == "deny"]
+    reasons = {e["reason_code"] for e in deny_rows}
     record(
         scenario_id="T07",
         description="Agent tool call without a valid delegation (none/malformed/unknown/other agent's task)",
@@ -93,7 +94,7 @@ def test_t07_missing_or_invalid_delegation(
         actual_decision="deny" if all(denied(r) for r in results.values()) else "allow",
         expected_side_effects=0,
         actual_side_effects=effects,
-        audit_events=len(reasons),
+        audit_events=len(deny_rows),
         attack=True,
     )
     for name, res in results.items():
@@ -152,6 +153,7 @@ def test_t08_agent_reads_in_scope_document(
 ) -> None:
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
     mark = db.mark()
+    since = db.now()
     res = mcp_call(
         mcp_server.url,
         kc.client_token("agent-alpha"),
@@ -159,6 +161,7 @@ def test_t08_agent_reads_in_scope_document(
         "documents.read",
         {"resource_id": "doc-alpha-eng"},
     )
+    audit = db.audit_since(since)
     reads = db.side_effects(mark, kind="document_read", resource_id="doc-alpha-eng")
     total = db.side_effects(mark)
     record(
@@ -169,13 +172,15 @@ def test_t08_agent_reads_in_scope_document(
         actual_decision="allow" if res.ok else "deny",
         expected_side_effects=1,
         actual_side_effects=reads,
-        audit_events=2,
+        audit_events=len(audit),
         attack=False,
     )
     assert res.ok and res.data is not None
     assert res.data["document_id"] == "doc-alpha-eng"
     assert set(res.data) == {"document_id", "title", "body", "classification"}
     assert reads == 1 and total == 1
+    assert [(e["event_kind"], e["decision"]) for e in audit] == [("decision", "allow"), ("execution", "n/a")]
+    assert audit[0]["agent_id"] == "agent-alpha" and audit[0]["principal_id"] == "alice"
 
 
 # ----------------------------------------------------------------------------- T09
@@ -245,7 +250,14 @@ def test_t09_injection_when_user_could_read_target(
             )
 
     mark = db.mark()
+    since = db.now()
     run_result = asyncio.run(run())
+    injected_denials = [
+        e
+        for e in db.audit_since(since)
+        if e["decision"] == "deny"
+        and e["tool_name"] in ("documents.read", "exports.simulate", "admin.grant_role")
+    ]
     injected = [t for t in run_result.trace if t.origin == "injected"]
     payroll = db.side_effects(mark, resource_id="doc-alpha-payroll")
     exports = db.side_effects(mark, kind="export_simulated")
@@ -257,13 +269,14 @@ def test_t09_injection_when_user_could_read_target(
         actual_decision="deny" if all(not t.ok for t in injected) else "allow",
         expected_side_effects=0,
         actual_side_effects=payroll + exports,
-        audit_events=len(injected),
+        audit_events=len(injected_denials),
         attack=True,
     )
     tools = [t.tool for t in injected]
     assert "documents.read" in tools and "exports.simulate" in tools and "admin.grant_role" in tools
     assert all(not t.ok for t in injected)
     assert payroll == 0 and exports == 0
+    assert len(injected_denials) == len(injected)  # every injected attempt is in the audit trail
 
 
 # ----------------------------------------------------------------------------- T10
@@ -331,12 +344,14 @@ def test_tool_arguments_cannot_carry_identity(
         {"approved": True},
     ]
     mark = db.mark()
+    since = db.now()
     results = mcp_calls(
         mcp_server.url,
         agent,
         task,
         [("documents.read", {"resource_id": "doc-alpha-payroll", **s}) for s in spoofs],
     )
+    rejected = [e for e in db.audit_since(since) if e["reason_code"] == "INVALID_ARGUMENTS"]
     effects = db.side_effects(mark)
     record(
         scenario_id="T12-mcp",
@@ -346,10 +361,11 @@ def test_tool_arguments_cannot_carry_identity(
         actual_decision="deny" if all(not r.ok for r in results) else "allow",
         expected_side_effects=0,
         actual_side_effects=effects,
-        audit_events=len(results),
+        audit_events=len(rejected),
         attack=True,
     )
     assert all(not r.ok and r.error and "INVALID_ARGUMENTS" in r.error for r in results)
+    assert len(rejected) == len(spoofs)
     assert effects == 0
 
 
@@ -498,8 +514,10 @@ def test_mcp_rejects_wrong_audience_and_missing_tokens(
         "workload_api_token": kc.client_token("svc-reporter"),
         "garbage": "not.a.token",
     }
+    since = db.now()
     statuses = {k: _raw_mcp(mcp_server.url, v).status_code for k, v in cases.items()}
     effects = db.side_effects(mark)
+    decisions = [e for e in db.audit_since(since) if e["event_kind"] in ("decision", "execution")]
     record(
         scenario_id="T05-mcp",
         description="MCP server given no token / API-audience tokens / garbage",
@@ -508,10 +526,11 @@ def test_mcp_rejects_wrong_audience_and_missing_tokens(
         actual_decision=",".join(sorted({str(s) for s in statuses.values()})),
         expected_side_effects=0,
         actual_side_effects=effects,
-        audit_events=0,
+        audit_events=len(decisions),
         attack=True,
     )
     assert set(statuses.values()) == {401}, statuses
+    assert decisions == []
     assert effects == 0
     r = _raw_mcp(mcp_server.url, None)
     assert "resource_metadata" in r.headers.get("www-authenticate", "")
@@ -608,6 +627,7 @@ def test_t11_mcp_policy_engine_down(
 ) -> None:
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
     mark = db.mark()
+    since = db.now()
     res = mcp_call(
         mcp_without_opa.url,
         kc.client_token("agent-alpha"),
@@ -616,6 +636,7 @@ def test_t11_mcp_policy_engine_down(
         {"resource_id": "doc-alpha-eng"},
     )
     effects = db.side_effects(mark)
+    incidents = [e for e in db.audit_since(since) if e["event_kind"] == "incident"]
     record(
         scenario_id="T11-mcp",
         description="OPA unreachable at the MCP tool boundary",
@@ -624,10 +645,11 @@ def test_t11_mcp_policy_engine_down(
         actual_decision="allow" if res.ok else "deny",
         expected_side_effects=0,
         actual_side_effects=effects,
-        audit_events=1,
+        audit_events=len(incidents),
         attack=False,
     )
     assert not res.ok and res.error is not None and "DEPENDENCY_UNAVAILABLE" in res.error
+    assert len(incidents) == 1 and incidents[0]["reason_code"] == "POLICY_UNAVAILABLE"
     assert effects == 0
 
 

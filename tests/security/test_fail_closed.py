@@ -192,7 +192,7 @@ def test_t11_audit_store_failure_blocks_allow(
         actual_decision=r.json()["decision"],
         expected_side_effects=0,
         actual_side_effects=effects,
-        audit_events=0,
+        audit_events=len(db.audit_for_request(r.json()["request_id"])),
         attack=False,
     )
     assert r.status_code == 503 and r.json()["decision"] == "deny"

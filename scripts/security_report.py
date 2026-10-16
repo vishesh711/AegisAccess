@@ -23,6 +23,10 @@ OWNER_DSN = os.environ.get(
 MANDATORY = [f"T{i:02d}" for i in range(1, 13)]
 
 
+def esc(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
 def main() -> int:
     if not SRC.exists():
         print("no recorded scenarios; run `pytest tests/security` first")
@@ -85,7 +89,7 @@ def main() -> int:
     ]
     for s in sorted(scenarios, key=lambda x: x["scenario_id"]):
         lines.append(
-            f"| {s['scenario_id']} | {s['description']} | `{s['request']}` | {s['expected_decision']} | "
+            f"| {s['scenario_id']} | {esc(s['description'])} | `{esc(s['request'])}` | {s['expected_decision']} | "
             f"{s['actual_decision']} | {s['expected_side_effects']}/{s['actual_side_effects']} | "
             f"{s['audit_events']} | {'PASS' if s['passed'] else '**FAIL**'} |"
         )

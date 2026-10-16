@@ -133,36 +133,37 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 ## 6. Milestones
 
 ### M0 — Foundation
-- [ ] pyproject + uv.lock + hashed requirements.lock; ruff, mypy strict on src
-- [ ] Dockerfile (non-root, hash-pinned install), compose with digest-pinned images, 127.0.0.1-only ports
-- [ ] Makefile: up, down, migrate, seed, lint, test, security-test, demo
-- [ ] migration runner + 0001 schema; `make lint` and unit tests green
-- [ ] artifacts/verification/M0.md
+- [x] pyproject + uv.lock + hashed requirements.lock; ruff, mypy strict on src
+- [x] Dockerfile (non-root, hash-pinned install), compose with digest-pinned images, 127.0.0.1-only ports
+- [x] Makefile: up, down, migrate, seed, lint, test, security-test, demo
+- [x] migration runner + 0001 schema; `make lint` and unit tests green
+- [x] artifacts/verification/M0.md
 
 ### M1 — Identity & tenancy
-- [ ] Keycloak realm import (fixed ids, audience mappers, short-lived client, OTP for secadmin)
-- [ ] JWT verifier: RS256 only, iss, aud, exp, nbf, typ=Bearer, azp allowlist, JWKS cache + refresh on unknown kid (rate-limited)
-- [ ] identity resolution from DB; RLS + tenant predicate; seed data
-- [ ] T01–T06, T12 pass against real Keycloak/Postgres; artifacts/verification/M1.md
+- [x] Keycloak realm import (fixed ids, audience mappers, short-lived client, OTP for secadmin)
+- [x] JWT verifier: RS256 only, iss, aud, exp, nbf, typ=Bearer, azp allowlist, JWKS cache + refresh on unknown kid (rate-limited)
+- [x] identity resolution from DB; RLS + tenant predicate; seed data
+- [x] T01–T06, T12 pass against real Keycloak/Postgres; artifacts/verification/M1.md
 
 ### M2 — Authorization
-- [ ] Rego policy + data + system.authz; `opa test`, `opa check --strict`, `opa fmt` clean
-- [ ] OPA client strict result parsing; PEP; decision/execution/incident audit; audit immutability
-- [ ] T01–T03, T11 end-to-end through real OPA; failure injection (down/timeout/500/malformed/undefined)
-- [ ] artifacts/verification/M2.md
+- [x] Rego policy + data + system.authz; `opa test`, `opa check --strict`, `opa fmt` clean
+- [x] OPA client strict result parsing; PEP; decision/execution/incident audit; audit immutability
+- [x] T01–T03, T11 end-to-end through real OPA; failure injection (down/timeout/500/malformed/undefined)
+- [x] artifacts/verification/M2.md
 
 ### M3 — Secure MCP
-- [ ] MCP server with official SDK, verifier, middleware, tool gateway, rate limit, timeouts
-- [ ] tasks/delegation API; deterministic planner (follows injected instructions naively); agent client
-- [ ] T07–T10 + MCP integration tests (list, impersonation, wrong audience, connection reuse, revoked/expired, schema) 
-- [ ] artifacts/verification/M3.md
+- [x] MCP server with official SDK, verifier, middleware, tool gateway, rate limit, timeouts
+- [x] tasks/delegation API; deterministic planner (follows injected instructions naively); agent client
+- [x] T07–T10 + MCP integration tests (list, impersonation, wrong audience, connection reuse, revoked/expired, schema) 
+- [x] artifacts/verification/M3.md
 
 ### M4 — Security validation
-- [ ] analytics fixture + SQL confusion matrix (baseline vs candidate, by rule, by policy version) + tests
-- [ ] security suite recorder → scenario_results + artifacts/security-test-report.md
-- [ ] docs: architecture, STRIDE, design review ADRs, residual risks, sql evaluation
-- [ ] CI workflow; clean-start run (`make down -v && make up migrate seed test security-test demo`)
-- [ ] artifacts/verification/M4.md
+- [x] analytics fixture + SQL confusion matrix (baseline vs candidate, by rule, by policy version) + tests
+- [x] security suite recorder → scenario_results + artifacts/security-test-report.md
+- [x] docs: architecture, STRIDE, design review ADRs, residual risks, sql evaluation
+- [x] clean-start run (`make down && make up migrate seed lint test security-test sql-eval demo`)
+- [ ] CI workflow executed on GitHub (written; not run from this environment — see BLOCKERS.md)
+- [x] artifacts/verification/M4.md
 
 ## 7. Test mapping
 
