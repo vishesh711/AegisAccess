@@ -28,7 +28,7 @@ from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp_types import ToolAnnotations
+from mcp_types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -213,10 +213,10 @@ class ToolCallGuard:
         except ToolError:
             rid = uuid.uuid4()
         # Sanitized: the submitted values are never echoed back.
-        return {
-            "content": [{"type": "text", "text": f"ACCESS_DENIED: {reason} (request_id={rid})"}],
-            "isError": True,
-        }
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"ACCESS_DENIED: {reason} (request_id={rid})")],
+            is_error=True,
+        )
 
 
 # --------------------------------------------------------------------------- server

@@ -51,7 +51,7 @@ integration:
 	$(UV) pytest tests/integration -q
 
 security-test:
-	$(UV) pytest tests/security -q -p tests.security.recorder
+	$(UV) pytest tests/security -q
 	$(UV) python scripts/security_report.py
 
 test: policy-test
