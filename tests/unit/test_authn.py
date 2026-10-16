@@ -194,7 +194,7 @@ def test_malformed_and_missing_kid(env: Any) -> None:
 
 
 def test_unknown_kid_refresh_is_rate_limited(env: Any) -> None:
-    idp, _, cache, v = env
+    idp, _, _cache, v = env
     attacker = _key()
     assert reason(v, _sign(attacker, _claims(), kid="forged-1")) == "UNKNOWN_SIGNING_KEY"
     hits_after_first = idp.jwks_hits

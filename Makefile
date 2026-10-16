@@ -5,7 +5,7 @@ OPA_IMAGE := openpolicyagent/opa:1.4.2-static@sha256:3c995dc8a59f6ddfd92eb7404d2
 UV := uv run
 # Optional: AEGIS_EXTRA_CA=/path/ca.pem  (TLS-intercepting proxy during image build only)
 
-.PHONY: help install up down migrate seed lint test unit policy-test integration security-test sql-eval demo logs reset
+.PHONY: help install up down migrate seed lint test unit policy-test integration security-test sql-eval demo logs reset audit-deps
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | sort | tr '\n' ' '; echo
@@ -62,3 +62,6 @@ sql-eval:
 
 demo:
 	$(UV) python scripts/demo.py
+
+audit-deps:
+	$(UV) pip-audit -r requirements.lock --require-hashes --disable-pip

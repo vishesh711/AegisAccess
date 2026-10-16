@@ -63,6 +63,11 @@ services:
       - --authorization=basic
       - --ignore=*_test.rego
       - /policies
+    healthcheck:
+      test: ["CMD", "/opa", "version"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     environment:
       AEGIS_OPA_TOKEN: ${OPA_TOKEN:-dummy-opa-pep-token}
     volumes:
@@ -82,8 +87,13 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       keycloak: {condition: service_healthy}
-      opa: {condition: service_started}
+      opa: {condition: service_healthy}
     ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -97,6 +107,11 @@ services:
     depends_on:
       api: {condition: service_started}
     ports: ["127.0.0.1:8001:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

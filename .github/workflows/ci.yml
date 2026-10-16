@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - name: ruff, format, mypy, opa fmt/check
+        run: make lint
+      - name: Rego policy tests
+        run: make policy-test
+      - name: Unit tests (no services)
+        run: make unit
+      - name: Dependency vulnerability scan (hash-pinned lockfile)
+        run: make audit-deps
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - name: Start stack (keycloak, postgres, opa, api, mcp-server)
+        run: make up
+      - run: make migrate seed
+      - name: Unit + integration + security tests against real Keycloak/OPA/PostgreSQL
+        run: make test
+      - name: Attack corpus with side-effect checks + report (fails on any unauthorized side effect)
+        run: make security-test
+      - run: make sql-eval
+      - run: make demo
+      - name: Container image scan (report only)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aegisaccess-app:local
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            artifacts/security-test-report.md
+            artifacts/verification/sql-eval.md
+            artifacts/tmp/scenarios.json
+      - name: Compose logs on failure
+        if: failure()
+        run: make logs
+      - if: always()
+        run: make down

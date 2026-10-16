@@ -1,0 +1,52 @@
+# AegisAccess STRIDE threat model
+
+Scope: the local MVP described in `docs/architecture.md`. Severity is a qualitative rating for this
+system (H/M/L). "Control test" links to executable tests; "residual" is what remains after the control.
+See also `docs/residual-risks.md`.
+
+## Assets
+Synthetic documents (incl. restricted payroll), delegations/tasks, audit trail, policy, signing keys
+(Keycloak), client secrets (dummy), PEP->OPA token (dummy).
+
+## Trust boundaries
+
+```
+ [TB1] client/CLI/agent host ──► API gateway          (bearer tokens, untrusted headers/bodies)
+ [TB2] API/MCP ──► Keycloak discovery + JWKS          (key material for token validation)
+ [TB3] API/MCP ──► OPA                                 (policy decisions)
+ [TB4] API/MCP ──► PostgreSQL                          (identity facts, protected data, audit)
+ [TB5] agent ──► MCP server                            (agent token, tool name/args, task selector)
+ [TB6] MCP tool gateway ──► resource adapter/DB        (typed operations only)
+ [TB7] untrusted CONTENT ──► agent planner             (document text, tool output = prompt injection)
+```
+
+## Threats
+
+| # | TB | STRIDE | Threat | Sev | Mitigation | Control test | Residual |
+|---|---|---|---|---|---|---|---|
+| S1 | TB1 | Spoofing | Forged JWT (own key, tampered payload, `alg=none`, HS256 key confusion, unknown kid, wrong issuer) | H | RS256-only allow-list before key lookup; kid must exist in issuer-pinned JWKS; signature, iss, aud, exp, nbf, typ verified by PyJWT | `tests/security/test_token_attacks.py::test_t06_forged_tokens`, `tests/unit/test_authn.py` | Compromise of Keycloak signing key is out of scope |
+| S2 | TB1 | Spoofing | Expired / not-yet-valid token replay | M | exp/nbf with zero leeway; short token lifetime (300 s, 2 s for test client) | `test_t04_expired_token`, `test_not_yet_valid` | Tokens are bearer: replay within lifetime possible (no DPoP/mTLS binding) |
+| S3 | TB1/TB5 | Spoofing / EoP | Token issued for another service used here (confused deputy, passthrough) | H | Per-service audience; tokens carrying the *other* AegisAccess audience rejected; azp allow-list per service; agent runner obtains its own token, never forwards user's | `test_t05_wrong_audience_tokens`, `test_mcp_rejects_wrong_audience_and_missing_tokens`, `test_multi_audience_token_for_two_services_rejected` | Audience is a logical id (`aegis-mcp`), not an RFC 8707 URI (ADR-4) |
+| S4 | TB1 | Spoofing | Caller asserts identity via headers/query/body (`X-Tenant-Id`, `X-Roles`, `owner_id`) | H | Identity only from verified token + DB; request models `extra=forbid`; headers never read | `tests/security/test_spoofing.py` | — |
+| S5 | TB5 | Spoofing | Identity/approval asserted in MCP tool arguments (`user_id`, `tenant_id`, `approved=true`) | H | Pre-dispatch guard rejects unknown argument keys (SDK would silently drop them) and audits | `test_tool_arguments_cannot_carry_identity` | — |
+| S6 | TB5 | Spoofing | Session/connection reuse carries a previous principal | M | Stateless streamable HTTP; bearer verified on every request; no session identity | `test_connection_reuse_does_not_leak_identity` | — |
+| S7 | TB1 | Spoofing | Valid IdP login for deactivated or unprovisioned person | M | DB `active` flag re-checked by policy; unknown (iss,sub) -> 403 | `test_deactivated_user_denied`, `test_unprovisioned_user_denied` | IdP session itself stays valid until expiry |
+| S8 | TB1 | Spoofing | Password guessing on privileged account | M | Keycloak brute-force detection; TOTP MFA required for `secadmin` | `test_secadmin_requires_mfa` | Demo uses password grant; production should use auth code + PKCE + WebAuthn |
+| T1 | TB4 | Tampering | Audit rows altered or deleted to hide activity | H | Runtime role has INSERT/SELECT only; trigger blocks UPDATE/DELETE/TRUNCATE even for owner | `tests/integration/test_data_layer.py::test_runtime_role_cannot_mutate_audit`, `test_even_owner_cannot_mutate_audit_rows`, `test_zz_secrecy.py::test_runtime_role_cannot_tamper_with_audit` | DB superuser can still disable triggers; no external WORM sink (ADR-3) |
+| T2 | TB3 | Tampering | Policy replaced via OPA REST API | H | OPA `--authentication=token --authorization=basic`; `system.authz` allows only decision queries + health | `test_opa_rejects_policy_replacement_even_with_pep_token`, `policies/system_authz_test.rego` | Policy files on host volume are trusted; no bundle signing |
+| T3 | TB4 | Tampering | Runtime role escalates its own grants or edits resources | H | No UPDATE on principal_roles/resources, no DDL | `test_runtime_role_has_no_ddl_or_side_effect_tampering` | — |
+| T4 | TB5 | Tampering | Tampered/stale delegation (e.g. lists actions the user cannot do, or `exports:simulate`) | H | Intersection re-evaluated every call: user grant, agent grant, task grant; nobody holds `exports:simulate` | `test_t10_unknown_and_forbidden_tools`, `test_role_revocation_takes_effect_on_running_delegation`, Rego `test_agent_never_exceeds_user` | — |
+| R1 | all | Repudiation | Actions cannot be attributed | M | Decision + execution events with request & correlation ids, principal, agent, task, policy version, evaluator status; authn failures logged | `test_t01_*` (decision+execution), `test_t09_prompt_injection_via_full_agent_run` (correlated attempts) | Audit is in the same DB as data |
+| I1 | TB1 | Info disclosure | Cross-tenant read by guessing ids (IDOR) | H | PDP tenant check; adapter tenant predicate; RLS; identical response for cross-tenant and nonexistent ids | `test_t03_cross_tenant_idor`, `test_cross_tenant_response_indistinguishable_from_missing`, `test_adapter_refuses_cross_tenant_read_even_if_called_directly`, `test_rls_*` | Timing side channel not evaluated |
+| I2 | TB7/TB5 | Info disclosure | Prompt injection makes agent read restricted data / exfiltrate | H | Tool boundary authorizes every call on user ∩ agent ∩ task; restricted never via agent; no network/export tool; planner obeys injection in tests | `test_t09_*`, `test_t10_*` | Allowed in-scope content can still be summarised wrongly (integrity of model output not addressed) |
+| I3 | TB5 | Info disclosure | Search leaks titles/ids of unauthorized docs | M | Candidates limited to agent tenant; each authorized before inclusion; title-only matching | `test_search_filters_before_returning` | Result *count* timing not evaluated |
+| I4 | all | Info disclosure | Tokens, secrets, document content in logs/audit/errors | H | No content in audit; identifier sanitization; redacting log filter; validation errors don't echo input; tool errors sanitized | `test_zz_secrecy.py` (scans all audit rows + raw logs for every issued token and canaries), `test_validation_errors_do_not_echo_input`, `test_denied_tool_errors_do_not_leak_content` | Keycloak's own logs are outside this scan |
+| I5 | TB3 | Info disclosure | Policy internals revealed to callers | L | Clients get coarse reason codes; details only in audit (security-admin) | `test_t02_alice_denied_payroll` | — |
+| D1 | TB3 | DoS -> fail-open | OPA down/slow/malformed causes allow | H | 1 s timeout; only literal `true` allows; any fault -> 503 deny + incident event | `tests/security/test_fail_closed.py` (6 fault modes, unreachable, wrong PEP token, real OPA container stopped), `test_t11_mcp_policy_engine_down` | Availability loss during outage (by design) |
+| D2 | TB4 | DoS -> fail-open | Audit store unavailable lets allowed action proceed unrecorded | H | Allow converted to deny (503) if decision event cannot be written | `test_t11_audit_store_failure_blocks_allow`, `tests/unit/test_pdp_pep.py::test_audit_failure_converts_allow_to_deny` | — |
+| D3 | TB5 | DoS | Agent floods tools / huge payloads | M | Per-agent rate limit; 64 KiB body limit; 16 KiB argument limit; strict schemas; step budget in planner; tool timeout | `test_without_test_tools_only_three_tools_and_rate_limit`, `test_schema_invalid_arguments_never_execute` | In-memory limiter is per process |
+| D4 | TB2 | DoS | Forged `kid` floods trigger JWKS refetch | L | Refresh at most once per window | `test_unknown_kid_refresh_is_rate_limited` | — |
+| E1 | TB5 | EoP | Agent exceeds delegating user / task | H | Intersection in PDP; task cannot enlarge user rights; delegation creation capped by PDP | `test_t09_injection_when_user_could_read_target`, `test_t12_cannot_delegate_beyond_own_permissions`, Rego tests | — |
+| E2 | TB5 | EoP | Unknown or dangerous tools (shell, SQL, HTTP, email, admin) | H | Allow-listed registry; guard denies unknown names before dispatch; no such tools exist | `test_t10_unknown_and_forbidden_tools`, `test_tools_list_is_exact_allowlist` | — |
+| E3 | TB5 | EoP | Agent uses another agent's / tenant's task id | H | Delegation looked up in agent's tenant (RLS) and must be bound to the agent | `test_t07_missing_or_invalid_delegation` | Task id is a selector bound to agent identity, not a proof-of-possession credential (ADR-2) |
+| E4 | TB1 | EoP | Role mis-assignment (agent role on human, unknown role) grants access | M | Roles only apply to their declared principal types; unknown roles grant nothing | Rego `test_agent_role_on_human_grants_nothing`, `test_unknown_role_grants_nothing` | — |
