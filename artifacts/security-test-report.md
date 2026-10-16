@@ -1,8 +1,8 @@
 # AegisAccess security test report
 
-* Generated: 2026-10-16T19:57:59+00:00
-* Git revision: `54da042` (working tree has uncommitted changes)
-* Run id (scenario_results.run_id): `04f64700-f9a9-4971-905e-762da691bf03`
+* Generated: 2026-10-16T19:59:12+00:00
+* Git revision: `7eeab1e`
+* Run id (scenario_results.run_id): `6bd7e89f-d016-4fb6-a136-208c4357e641`
 * pytest exit status for `tests/security`: **0** (0 = all tests passed)
 * Scenarios recorded: 28; outcome mismatches: 0; mandatory T01-T12 missing: none
 
@@ -13,7 +13,7 @@ inferred from HTTP status codes. Audit counts are rows in the append-only `audit
 | Scenario | Description | Request | Expected | Actual | Side effects (exp/obs) | Audit rows | Result |
 |---|---|---|---|---|---|---|---|
 | AUDIT-IMMUTABLE | Runtime DB role attempts UPDATE/DELETE/TRUNCATE on audit | `aegis_app: UPDATE/DELETE/TRUNCATE audit_events` | deny | deny | 0/0 | 0 | PASS |
-| AUDIT-SECRECY | Scan of 818 audit rows for tokens/secrets/canaries | `SELECT * FROM audit_events` | clean | clean | 0/0 | 818 | PASS |
+| AUDIT-SECRECY | Scan of 1018 audit rows for tokens/secrets/canaries | `SELECT * FROM audit_events` | clean | clean | 0/0 | 1018 | PASS |
 | LOG-SECRECY | Scan of 5598 raw log records | `captured application/library logs` | clean | clean | 0/0 | 0 | PASS |
 | T01 | Alice reads alpha engineering document | `GET /api/v1/resources/doc-alpha-eng (alice token)` | allow | allow | 1/1 | 2 | PASS |
 | T02 | Alice (engineer) reads restricted payroll | `GET /api/v1/resources/doc-alpha-payroll (alice token)` | deny | deny | 0/0 | 1 | PASS |
@@ -43,8 +43,8 @@ inferred from HTTP status codes. Audit counts are rows in the append-only `audit
 
 ## Policy decision latency (measured, not a guarantee)
 
-From `audit_events.duration_ms` of successful OPA evaluations accumulated in this database (n=457).
-p50 = 4.98 ms, p95 = 8.09 ms, max = 91.75 ms.
+From `audit_events.duration_ms` of successful OPA evaluations accumulated in this database (n=568).
+p50 = 5.07 ms, p95 = 8.16 ms, max = 118.67 ms.
 Environment: Linux-6.18.44-fc-v139-x86_64-with-glibc2.39, Python 3.12.3, OPA in Docker on the same host,
 PEP->OPA over the local Docker bridge/loopback. Includes HTTP round trip; excludes JWT validation and DB.
 The PRD target (p95 < 100 ms) is aspirational for local runs; this sample is not a load test.
