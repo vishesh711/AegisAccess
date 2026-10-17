@@ -20,9 +20,10 @@ from dataclasses import dataclass, replace
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
-from aegis.db import Conn, tenant_transaction
+from aegis.agent_tokens import load_binding
+from aegis.db import Conn
 from aegis.delegation import TaskDelegation, load_delegation, parse_task_id
-from aegis.identity import Principal, load_principal
+from aegis.identity import Principal
 from aegis.pep import Decision, Enforcer, PolicyResource, RequestMeta
 from aegis.resources import DocumentStore, ResourceMeta, get_metadata, valid_resource_id
 
@@ -72,8 +73,12 @@ class ToolDeniedError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ToolCaller:
+    """Who is calling, as established from the verified bearer token (never from tool arguments)."""
+
     agent: Principal
     meta: RequestMeta
+    user: Principal | None = None  # the delegating human (token ``sub``); None = not a delegated token
+    token_id: str | None = None  # the token's ``jti``; must be bound to the task being acted on
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,25 +159,34 @@ class ToolGateway:
     async def _context(self, caller: ToolCaller, raw_task_id: str | None, action: str) -> _Ctx:
         meta = caller.meta
         agent = caller.agent
-        # A. caller must be an active, registered agent identity.
+        # A. caller must be an active, registered agent identity acting for a human (exchanged token).
         if agent.type != "agent" or not agent.active:
             raise await self._deny(caller, meta, "AGENT_INACTIVE_OR_NOT_AGENT", action=action)
+        user = caller.user
+        if user is None or user.type != "human" or caller.token_id is None:
+            raise await self._deny(caller, meta, "DELEGATED_TOKEN_REQUIRED", action=action)
         if not self._limiter.allow(agent.id):
             raise await self._deny(caller, meta, "RATE_LIMITED", action=action)
         # B. server-side delegation, looked up inside the AGENT's tenant only.
         task_id = parse_task_id(raw_task_id)
         if task_id is None:
             raise await self._deny(caller, meta, "DELEGATION_MISSING", action=action)
+        # The token itself must have been bound to THIS task by the agent host at exchange time.
+        binding = await load_binding(self._pool, tenant_id=agent.tenant_id, token_id=caller.token_id)
+        if binding is None:
+            raise await self._deny(caller, meta, "TOKEN_NOT_BOUND", action=action, task_id=task_id)
+        if binding.task_id != task_id:
+            raise await self._deny(caller, meta, "TOKEN_NOT_BOUND_TO_TASK", action=action, task_id=task_id)
+        if binding.user_id != user.id or binding.agent_id != agent.id:
+            raise await self._deny(caller, meta, "TOKEN_BINDING_MISMATCH", action=action, task_id=task_id)
         delegation = await load_delegation(self._pool, tenant_id=agent.tenant_id, task_id=task_id)
         if delegation is None:
             raise await self._deny(caller, meta, "DELEGATION_NOT_FOUND", action=action, task_id=task_id)
         problems = delegation.problems(agent=agent)
+        if delegation.owner_id != user.id:
+            problems.append("DELEGATION_USER_MISMATCH")
         if problems:
             raise await self._deny(caller, meta, ",".join(problems), action=action, task_id=task_id)
-        async with tenant_transaction(self._pool, agent.tenant_id) as conn:
-            user = await load_principal(conn, delegation.owner_id, delegation.tenant_id)
-        if user is None:
-            raise await self._deny(caller, meta, "DELEGATING_USER_UNKNOWN", action=action, task_id=task_id)
         return _Ctx(caller=caller, meta=meta, delegation=delegation, user=user)
 
     async def _authorize(

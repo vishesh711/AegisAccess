@@ -13,7 +13,16 @@ import pytest
 
 from aegis.agent_client import McpToolClient
 from aegis.planner import ToolResult
-from tests.conftest import CANARIES, Evidence, Keycloak, ServerHandle, free_port, make_settings, start_server
+from tests.conftest import (
+    CANARIES,
+    Evidence,
+    Keycloak,
+    ServerHandle,
+    bound_agent_token,
+    free_port,
+    make_settings,
+    start_server,
+)
 
 pytestmark = pytest.mark.security
 
@@ -36,12 +45,17 @@ def mcp_call(url: str, token: str, task_id: str | None, name: str, args: dict[st
 
 
 def create_task(
-    api: httpx.Client, kc: Keycloak, user: str, resource_ids: list[str], actions: list[str] | None = None
+    api: httpx.Client,
+    kc: Keycloak,
+    user: str,
+    resource_ids: list[str],
+    actions: list[str] | None = None,
+    agent: str = "agent-alpha",
 ) -> str:
     r = api.post(
         "/api/v1/tasks",
         json={
-            "agent_id": "agent-alpha",
+            "agent_id": agent,
             "actions": actions or ["documents:read", "reports:create"],
             "resource_ids": resource_ids,
         },
@@ -62,8 +76,10 @@ def denied(res: ToolResult) -> bool:
 def test_t07_missing_or_invalid_delegation(
     mcp_server: ServerHandle, api: httpx.Client, kc: Keycloak, db: Evidence, record: Any
 ) -> None:
-    agent = kc.client_token("agent-alpha")
     real_task = create_task(api, kc, "alice", ["doc-alpha-eng"])
+    agent = bound_agent_token(kc, "alice", real_task)  # valid token, bound to real_task
+    carol_task = create_task(api, kc, "carol", ["doc-beta-eng"], agent="agent-beta")
+    beta_token = bound_agent_token(kc, "carol", carol_task, agent="agent-beta")
     cases = {
         "no_task_header": None,
         "malformed_task": "not-a-uuid",
@@ -75,10 +91,10 @@ def test_t07_missing_or_invalid_delegation(
         k: mcp_call(mcp_server.url, agent, v, "documents.read", {"resource_id": "doc-alpha-eng"})
         for k, v in cases.items()
     }
-    # Another agent (beta tenant) presenting alice's real task id.
+    # Another agent (beta tenant) with a valid token of its own, presenting alice's real task id.
     results["other_agents_task"] = mcp_call(
         mcp_server.url,
-        kc.client_token("agent-beta"),
+        beta_token,
         real_task,
         "documents.read",
         {"resource_id": "doc-alpha-eng"},
@@ -100,17 +116,20 @@ def test_t07_missing_or_invalid_delegation(
     for name, res in results.items():
         assert denied(res), name
     assert effects == 0
-    assert {"DELEGATION_MISSING", "DELEGATION_NOT_FOUND"} <= reasons
+    assert {"DELEGATION_MISSING", "TOKEN_NOT_BOUND_TO_TASK"} <= reasons
 
 
 def test_t07_revoked_and_expired_delegations(
     mcp_server: ServerHandle, api: httpx.Client, kc: Keycloak, db: Evidence
 ) -> None:
-    agent = kc.client_token("agent-alpha")
     revoked = create_task(api, kc, "alice", ["doc-alpha-eng"])
     expired = create_task(api, kc, "alice", ["doc-alpha-eng"])
+    revoked_token = bound_agent_token(kc, "alice", revoked)
+    expired_token = bound_agent_token(kc, "alice", expired)
     # sanity: works before revocation
-    assert mcp_call(mcp_server.url, agent, revoked, "documents.read", {"resource_id": "doc-alpha-eng"}).ok
+    assert mcp_call(
+        mcp_server.url, revoked_token, revoked, "documents.read", {"resource_id": "doc-alpha-eng"}
+    ).ok
     r = api.post(
         f"/api/v1/tasks/{revoked}/revoke", headers={"Authorization": f"Bearer {kc.password_token('alice')}"}
     )
@@ -123,10 +142,10 @@ def test_t07_revoked_and_expired_delegations(
     mark = db.mark()
     since = db.now()
     assert denied(
-        mcp_call(mcp_server.url, agent, revoked, "documents.read", {"resource_id": "doc-alpha-eng"})
+        mcp_call(mcp_server.url, revoked_token, revoked, "documents.read", {"resource_id": "doc-alpha-eng"})
     )
     assert denied(
-        mcp_call(mcp_server.url, agent, expired, "documents.read", {"resource_id": "doc-alpha-eng"})
+        mcp_call(mcp_server.url, expired_token, expired, "documents.read", {"resource_id": "doc-alpha-eng"})
     )
     assert db.side_effects(mark) == 0
     reasons = " ".join(e["reason_code"] for e in db.audit_since(since))
@@ -156,7 +175,7 @@ def test_t08_agent_reads_in_scope_document(
     since = db.now()
     res = mcp_call(
         mcp_server.url,
-        kc.client_token("agent-alpha"),
+        bound_agent_token(kc, "alice", task),
         task,
         "documents.read",
         {"resource_id": "doc-alpha-eng"},
@@ -194,7 +213,7 @@ def test_t09_prompt_injection_via_full_agent_run(
     task = create_task(api, kc, "alice", ["doc-alpha-eng", "doc-alpha-eng-notes"])
     mark = db.mark()
     r = api.post(
-        f"/api/v1/tasks/{task}/invoke", headers={"Authorization": f"Bearer {kc.password_token('alice')}"}
+        f"/api/v1/tasks/{task}/invoke", headers={"Authorization": f"Bearer {kc.consent_token('alice')}"}
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -239,12 +258,11 @@ def test_t09_injection_when_user_could_read_target(
 ) -> None:
     """Bob (finance) CAN read payroll himself; his agent, working on a finance-notes task, still cannot."""
     task = create_task(api, kc, "bob", ["doc-alpha-finance-notes"])
+    token = bound_agent_token(kc, "bob", task)
     from aegis.planner import DeterministicPlanner
 
     async def run() -> Any:
-        async with McpToolClient(
-            url=f"{mcp_server.url}/mcp", access_token=kc.client_token("agent-alpha"), task_id=task
-        ) as c:
+        async with McpToolClient(url=f"{mcp_server.url}/mcp", access_token=token, task_id=task) as c:
             return await DeterministicPlanner().run(
                 task_id=task, resource_ids=["doc-alpha-finance-notes"], client=c
             )
@@ -305,7 +323,7 @@ def test_t10_unknown_and_forbidden_tools(
     ]
     mark = db.mark()
     since = db.now()
-    results = mcp_calls(mcp_server.url, kc.client_token("agent-alpha"), task, calls)
+    results = mcp_calls(mcp_server.url, bound_agent_token(kc, "bob", task), task, calls)
     effects = db.side_effects(mark)
     audit = [e for e in db.audit_since(since) if e["decision"] == "deny"]
     record(
@@ -334,7 +352,7 @@ def test_tool_arguments_cannot_carry_identity(
     mcp_server: ServerHandle, api: httpx.Client, kc: Keycloak, db: Evidence, record: Any
 ) -> None:
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
-    agent = kc.client_token("agent-alpha")
+    agent = bound_agent_token(kc, "alice", task)
     spoofs = [
         {"user_id": "bob"},
         {"tenant_id": "beta"},
@@ -392,7 +410,7 @@ def test_schema_invalid_arguments_never_execute(
 ) -> None:
     task = create_task(api, kc, "alice", ["doc-alpha-eng"], actions=["documents:read", "documents:search"])
     mark = db.mark()
-    res = mcp_call(mcp_server.url, kc.client_token("agent-alpha"), task, tool, args)
+    res = mcp_call(mcp_server.url, bound_agent_token(kc, "alice", task), task, tool, args)
     assert not res.ok
     assert res.error is not None and ("INVALID_ARGUMENTS" in res.error or "PAYLOAD_TOO_LARGE" in res.error)
     assert "xxxxxxxx" not in res.error and "passwd" not in res.error  # values never echoed
@@ -405,7 +423,7 @@ def test_search_filters_before_returning(
     task = create_task(
         api, kc, "alice", ["doc-alpha-eng", "doc-alpha-eng-notes"], actions=["documents:search"]
     )
-    agent = kc.client_token("agent-alpha")
+    agent = bound_agent_token(kc, "alice", task)
     res = mcp_call(mcp_server.url, agent, task, "documents.search", {"query": "Alpha", "max_results": 10})
     assert res.ok and res.data is not None
     ids = [i["document_id"] for i in res.data["items"]]
@@ -422,7 +440,7 @@ def test_report_requires_all_sources_in_scope(
 ) -> None:
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
     other_task = create_task(api, kc, "alice", ["doc-alpha-eng"])
-    agent = kc.client_token("agent-alpha")
+    agent = bound_agent_token(kc, "alice", task)
     mark = db.mark()
     bad = mcp_call(
         mcp_server.url,
@@ -456,7 +474,7 @@ def test_role_revocation_takes_effect_on_running_delegation(
 ) -> None:
     """User grants are re-evaluated on every tool call: removing alice's role stops her agent at once."""
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
-    agent = kc.client_token("agent-alpha")
+    agent = bound_agent_token(kc, "alice", task)
     assert mcp_call(mcp_server.url, agent, task, "documents.read", {"resource_id": "doc-alpha-eng"}).ok
     db.execute("DELETE FROM principal_roles WHERE principal_id = 'alice' AND role_id = 'engineer'")
     try:
@@ -472,7 +490,7 @@ def test_deactivated_agent_identity_denied(
     mcp_server: ServerHandle, api: httpx.Client, kc: Keycloak, db: Evidence
 ) -> None:
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
-    agent = kc.client_token("agent-alpha")
+    agent = bound_agent_token(kc, "alice", task)
     db.execute("UPDATE agent_identities SET active = false WHERE principal_id = 'agent-alpha'")
     try:
         mark = db.mark()
@@ -539,16 +557,17 @@ def test_mcp_rejects_wrong_audience_and_missing_tokens(
 def test_connection_reuse_does_not_leak_identity(
     mcp_server: ServerHandle, api: httpx.Client, kc: Keycloak, db: Evidence
 ) -> None:
-    """Same HTTP client / keep-alive connection; the second request carries agent-beta's token and must
-    be evaluated as agent-beta (stateless mode: identity comes from each request's bearer token)."""
+    """Same HTTP client / keep-alive connection; the second request carries BOB's bound token and must
+    be evaluated as bob-via-agent (stateless mode: identity comes from each request's bearer token)."""
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
+    bob_token = bound_agent_token(kc, "bob", create_task(api, kc, "bob", ["doc-alpha-finance-notes"]))
+
+    alice_token = bound_agent_token(kc, "alice", task)
 
     async def go() -> tuple[ToolResult, ToolResult]:
-        async with McpToolClient(
-            url=f"{mcp_server.url}/mcp", access_token=kc.client_token("agent-alpha"), task_id=task
-        ) as c:
+        async with McpToolClient(url=f"{mcp_server.url}/mcp", access_token=alice_token, task_id=task) as c:
             first = await c.call("documents.read", {"resource_id": "doc-alpha-eng"})
-            c._http.headers["Authorization"] = f"Bearer {kc.client_token('agent-beta')}"
+            c._http.headers["Authorization"] = f"Bearer {bob_token}"
             second = await c.call("documents.read", {"resource_id": "doc-alpha-eng"})
             return first, second
 
@@ -561,7 +580,7 @@ def test_connection_reuse_does_not_leak_identity(
 def test_tools_list_is_exact_allowlist(mcp_server: ServerHandle, kc: Keycloak) -> None:
     async def go() -> list[Any]:
         async with McpToolClient(
-            url=f"{mcp_server.url}/mcp", access_token=kc.client_token("agent-alpha"), task_id=None
+            url=f"{mcp_server.url}/mcp", access_token=kc.exchanged_token("alice"), task_id=None
         ) as c:
             return await c.list_tools()
 
@@ -593,10 +612,10 @@ def production_like_mcp() -> Iterator[ServerHandle]:
 def test_without_test_tools_only_three_tools_and_rate_limit(
     production_like_mcp: ServerHandle, api: httpx.Client, kc: Keycloak, db: Evidence
 ) -> None:
-    agent = kc.client_token("agent-alpha")
-
     async def go() -> list[Any]:
-        async with McpToolClient(url=f"{production_like_mcp.url}/mcp", access_token=agent, task_id=None) as c:
+        async with McpToolClient(
+            url=f"{production_like_mcp.url}/mcp", access_token=kc.exchanged_token("alice"), task_id=None
+        ) as c:
             return await c.list_tools()
 
     assert {t.name for t in asyncio.run(go())} == {
@@ -605,6 +624,7 @@ def test_without_test_tools_only_three_tools_and_rate_limit(
         "reports.create_summary",
     }
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
+    agent = bound_agent_token(kc, "alice", task)
     mark = db.mark()
     results = mcp_calls(
         production_like_mcp.url, agent, task, [("documents.read", {"resource_id": "doc-alpha-eng"})] * 5
@@ -630,7 +650,7 @@ def test_t11_mcp_policy_engine_down(
     since = db.now()
     res = mcp_call(
         mcp_without_opa.url,
-        kc.client_token("agent-alpha"),
+        bound_agent_token(kc, "alice", task),
         task,
         "documents.read",
         {"resource_id": "doc-alpha-eng"},
@@ -659,7 +679,7 @@ def test_denied_tool_errors_do_not_leak_content(
     task = create_task(api, kc, "alice", ["doc-alpha-eng"])
     res = mcp_call(
         mcp_server.url,
-        kc.client_token("agent-alpha"),
+        bound_agent_token(kc, "alice", task),
         task,
         "documents.read",
         {"resource_id": "doc-alpha-payroll"},

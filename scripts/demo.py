@@ -34,8 +34,10 @@ def totp(key: bytes) -> str:
     return f"{(struct.unpack('>I', digest[o : o + 4])[0] & 0x7FFFFFFF) % 1_000_000:06d}"
 
 
-def login(user: str) -> str:
+def login(user: str, scope: str | None = None) -> str:
     data = {"grant_type": "password", "client_id": "aegis-cli", "username": user, "password": PW[user]}
+    if scope:
+        data["scope"] = scope
     if user == "secadmin":
         data["totp"] = totp(OTP_KEY)
     r = httpx.post(TOKEN_URL, data=data, timeout=10)
@@ -101,7 +103,14 @@ def main() -> int:
     task = r.json()
     print(f"task {task['task_id']} actions={task['actions']} resources={task['resource_ids']}")
     m = mark(conn)
-    r = httpx.post(f"{API}/api/v1/tasks/{task['task_id']}/invoke", headers=alice, timeout=60)
+    # Starting the agent needs Alice's consent: a token carrying scope delegate-agent-alpha. The agent host
+    # exchanges it at Keycloak for a token bound to Alice + agent-alpha, then binds that token to this task.
+    consent = {"Authorization": f"Bearer {login('alice', scope='delegate-agent-alpha')}"}
+    no_consent = httpx.post(f"{API}/api/v1/tasks/{task['task_id']}/invoke", headers=alice, timeout=60)
+    print(
+        f"invoke without consent scope: HTTP {no_consent.status_code}, needs scope {no_consent.json().get('consent_scope')}"
+    )
+    r = httpx.post(f"{API}/api/v1/tasks/{task['task_id']}/invoke", headers=consent, timeout=60)
     run = r.json()
     for t in run["trace"]:
         status = "ALLOWED" if t["ok"] else "DENIED "

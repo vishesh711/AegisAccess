@@ -4,8 +4,9 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 
 ## Residual risks
 1. **Bearer tokens are not sender-constrained.** A stolen token works until expiry (300 s). No DPoP/mTLS.
-2. **Agent identity = client secret.** Holder of `agent-alpha`'s secret can act on any task delegated to
-   that agent (ADR-2). Token exchange binding tokens to a task is Phase 2.
+2. **Trusted agent host.** Agent tokens come from a user-consented token exchange and are bound to one
+   task (ADR-2), so a stolen agent secret alone is useless. The process that performs the exchange and
+   writes the binding (here, the API) is still trusted to bind the token to the task the user invoked.
 3. **Audit in the same database.** Superuser can disable the immutability trigger; no external WORM sink.
 4. **Local-demo IdP settings.** Keycloak `start-dev` (HTTP, H2), password grant for the CLI client,
    `sslRequired=none`. Not acceptable in production.
@@ -29,6 +30,6 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
     another run's id to muddy correlation; `request_id` is always server-generated.
 
 ## Deferred (Phase 2, per PRD §12)
-Go gateway; OAuth token exchange with `act` claims; human approval workflow with nonce and argument
+Go gateway; `act`-claim delegation chains; human approval workflow with nonce and argument
 digest binding; mTLS workload identity; risk-adaptive access / device posture; security dashboard;
 external audit sink; load testing with high-cardinality data.

@@ -7,7 +7,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -16,8 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from aegis.agent_client import McpToolClient, fetch_client_credentials_token
-from aegis.authn import JwksUnavailableError, TokenValidationError, bearer_from_header
+from aegis.agent_client import McpToolClient
+from aegis.agent_tokens import AgentTokenError, consent_scope, issue_task_token
+from aegis.authn import JwksUnavailableError, TokenValidationError, VerifiedToken, bearer_from_header
 from aegis.config import Settings, get_settings
 from aegis.db import tenant_transaction, transaction
 from aegis.delegation import AGENT_DELEGABLE_ACTIONS, create_task, load_delegation, parse_task_id, revoke_task
@@ -46,6 +47,10 @@ class ApiError(Exception):
 class Caller:
     principal: Principal
     meta: RequestMeta
+    verified: VerifiedToken
+    # The raw bearer token is kept only so the agent host can EXCHANGE it at Keycloak (RFC 8693) for a
+    # user-bound agent token. It is never logged, stored, or sent to any resource server.
+    raw_token: str = field(repr=False, default="")
 
 
 def _services(request: Request) -> Services:
@@ -103,7 +108,7 @@ async def authenticated(request: Request) -> Caller:
     except IdentityError as exc:
         await services.enforcer.record_authn_failure(meta, exc.reason)
         raise ApiError(403, {"request_id": str(meta.request_id), "reason_code": "ACCESS_DENIED"}) from exc
-    return Caller(principal=principal, meta=meta)
+    return Caller(principal=principal, meta=meta, verified=verified, raw_token=token)
 
 
 CallerDep = Annotated[Caller, Depends(authenticated)]
@@ -334,12 +339,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task_id=tid,
             )
             raise _deny(d)
-        agent_token = await fetch_client_credentials_token(
-            services.http,
-            token_endpoint=settings.token_endpoint,
-            client_id=settings.agent_client_id,
-            client_secret=settings.agent_client_secret.get_secret_value(),
-        )
+        async with tenant_transaction(services.pool, caller.principal.tenant_id) as conn:
+            agent = await load_principal(conn, delegation.agent_id, delegation.tenant_id)
+        if agent is None or agent.client_id != settings.agent_client_id:
+            d = await services.enforcer.deny_without_evaluation(
+                caller.meta,
+                subject=caller.principal,
+                action="tasks:invoke",
+                resource_id=None,
+                reason="AGENT_HOST_MISMATCH",
+                task_id=tid,
+            )
+            raise _deny(d)
+        # Consent: the user's token must name this agent in its audience (scope delegate-<agent>).
+        if settings.agent_client_id not in caller.verified.audience:
+            d = await services.enforcer.deny_without_evaluation(
+                caller.meta,
+                subject=caller.principal,
+                action="tasks:invoke",
+                resource_id=None,
+                reason="CONSENT_REQUIRED",
+                task_id=tid,
+            )
+            raise ApiError(
+                403, {**_decision_body(d), "consent_scope": consent_scope(settings.agent_client_id)}
+            )
+        try:
+            agent_token = await issue_task_token(
+                http=services.http,
+                pool=services.pool,
+                mcp_verifier=services.mcp_verifier,
+                token_endpoint=settings.token_endpoint,
+                client_id=settings.agent_client_id,
+                client_secret=settings.agent_client_secret.get_secret_value(),
+                user_token=caller.raw_token,
+                delegation=delegation,
+            )
+        except AgentTokenError as exc:
+            d = await services.enforcer.deny_without_evaluation(
+                caller.meta,
+                subject=caller.principal,
+                action="tasks:invoke",
+                resource_id=None,
+                reason=exc.reason,
+                task_id=tid,
+            )
+            raise _deny(d) from exc
         planner = DeterministicPlanner()
         async with McpToolClient(
             url=settings.mcp_url,

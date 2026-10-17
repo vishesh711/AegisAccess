@@ -28,7 +28,10 @@
       "defaultClientScopes": [
         "basic"
       ],
-      "optionalClientScopes": [],
+      "optionalClientScopes": [
+        "delegate-agent-alpha",
+        "delegate-agent-beta"
+      ],
       "attributes": {
         "post.logout.redirect.uris": ""
       },
@@ -149,7 +152,7 @@
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true,
+      "serviceAccountsEnabled": false,
       "fullScopeAllowed": false,
       "defaultClientScopes": [
         "basic"
@@ -167,7 +170,10 @@
             "introspection.token.claim": "true"
           }
         }
-      ]
+      ],
+      "attributes": {
+        "standard.token.exchange.enabled": "true"
+      }
     },
     {
       "clientId": "agent-beta",
@@ -197,7 +203,10 @@
             "introspection.token.claim": "true"
           }
         }
-      ]
+      ],
+      "attributes": {
+        "standard.token.exchange.enabled": "true"
+      }
     }
   ],
   "users": [
@@ -310,16 +319,95 @@
       "serviceAccountClientId": "svc-reporter"
     },
     {
-      "id": "11111111-1111-4111-8111-000000000102",
-      "username": "service-account-agent-alpha",
-      "enabled": true,
-      "serviceAccountClientId": "agent-alpha"
-    },
-    {
       "id": "11111111-1111-4111-8111-000000000103",
       "username": "service-account-agent-beta",
       "enabled": true,
       "serviceAccountClientId": "agent-beta"
     }
-  ]
+  ],
+  "clientScopes": [
+    {
+      "name": "basic",
+      "description": "OpenID Connect scope for add all basic claims to the token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "auth_time",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "AUTH_TIME",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "auth_time",
+            "jsonType.label": "long"
+          }
+        },
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegate-agent-alpha",
+      "description": "User consent: lets agent-alpha exchange this token for one acting on the user's behalf",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "aud-agent-alpha",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "agent-alpha",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegate-agent-beta",
+      "description": "User consent: lets agent-beta exchange this token for one acting on the user's behalf",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "aud-agent-beta",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "agent-beta",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "basic"
+  ],
+  "defaultOptionalClientScopes": []
 }

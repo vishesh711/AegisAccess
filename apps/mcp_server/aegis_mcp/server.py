@@ -38,7 +38,7 @@ from starlette.routing import Mount, Route
 from aegis.agent_client import CORRELATION_HEADER, TASK_HEADER
 from aegis.authn import TokenValidationError, VerifiedToken
 from aegis.config import Settings, get_settings
-from aegis.identity import IdentityError, resolve_principal
+from aegis.identity import IdentityError, resolve_delegated
 from aegis.logging import configure_logging, install_redaction_on_all_handlers
 from aegis.pep import RequestMeta
 from aegis.services import Services, open_services
@@ -133,7 +133,7 @@ class AegisTokenVerifier:
             expires_at=vt.expires_at,
             subject=vt.subject,
             resource=services.settings.mcp_resource_url,
-            claims={"iss": vt.issuer, "aud": list(vt.audience)},
+            claims={"iss": vt.issuer, "aud": list(vt.audience), "jti": vt.token_id},
         )
 
 
@@ -147,7 +147,7 @@ def _verified_from_context() -> VerifiedToken | None:
         client_id=at.client_id,
         audience=tuple(at.claims.get("aud", ())),
         expires_at=at.expires_at or 0,
-        token_id=None,
+        token_id=at.claims.get("jti") if isinstance(at.claims.get("jti"), str) else None,
         scopes=tuple(at.scopes),
     )
 
@@ -166,12 +166,12 @@ async def _resolve_caller(services: Services, tool_name: str, headers: Any) -> T
     if vt is None:
         raise ToolError(f"UNAUTHENTICATED (request_id={meta.request_id})")
     try:
-        # human_login_clients is empty: a human login token can never act as an MCP caller.
-        principal = await resolve_principal(services.pool, vt, human_login_clients=frozenset())
+        # Only exchanged tokens are accepted: sub = the consenting human, azp = the acting agent.
+        user, agent = await resolve_delegated(services.pool, vt)
     except IdentityError as exc:
         await services.enforcer.record_authn_failure(meta, exc.reason)
         raise ToolError(f"ACCESS_DENIED (request_id={meta.request_id})") from exc
-    return ToolCaller(agent=principal, meta=meta)
+    return ToolCaller(agent=agent, meta=meta, user=user, token_id=vt.token_id)
 
 
 # --------------------------------------------------------------------------- pre-dispatch guard

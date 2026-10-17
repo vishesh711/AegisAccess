@@ -94,3 +94,35 @@ async def load_principal(conn: Conn, principal_id: str, tenant_id: str) -> Princ
     )
     row = await cur.fetchone()
     return _from_row(row) if row else None
+
+
+async def resolve_delegated(
+    pool: AsyncConnectionPool[Conn], token: VerifiedToken
+) -> tuple[Principal, Principal]:
+    """Resolve an exchanged token (``sub`` = the delegating human, ``azp`` = the acting agent).
+
+    Returns (user, agent). A token whose subject is not a human — e.g. an agent's own
+    client-credentials token — is refused: an agent may only act for a person who consented.
+    """
+    async with transaction(pool) as conn:
+        user_row = await (
+            await conn.execute(
+                _PRINCIPAL_SQL.format(where="p.oidc_issuer = %s AND p.oidc_sub = %s"),
+                (token.issuer, token.subject),
+            )
+        ).fetchone()
+        agent_row = await (
+            await conn.execute(
+                _PRINCIPAL_SQL.format(where="p.client_id = %s AND p.type = 'agent'"), (token.client_id,)
+            )
+        ).fetchone()
+    if agent_row is None:
+        raise IdentityError("UNKNOWN_AGENT")
+    if user_row is None:
+        raise IdentityError("UNKNOWN_PRINCIPAL")
+    user, agent = _from_row(user_row), _from_row(agent_row)
+    if user.type != "human":
+        raise IdentityError("DELEGATED_TOKEN_REQUIRED")
+    if user.tenant_id != agent.tenant_id:
+        raise IdentityError("CROSS_TENANT_DELEGATION")
+    return user, agent

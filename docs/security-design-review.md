@@ -17,24 +17,34 @@ govern, but a cross-service availability dependency and larger blast radius.
 not a guarantee. A production setup would add mTLS between PEP and OPA, signed bundles, and decision
 logs shipped off-host. Revisit if p95 latency or availability requirements tighten.
 
-## ADR-2: Delegation mechanism (server-stored task + agent's own credential)
+## ADR-2: Delegation mechanism (server-stored task + user-bound agent token via token exchange)
 
 **Decision.** A user creates a task through the authenticated API; the server stores the delegation
 (user, agent, actions, resource ids, expiry). The PDP caps it: each requested (action, resource) must
 be allowed for the user at creation time, and the full intersection user ∩ agent ∩ task is re-evaluated
-on **every** tool call with freshly loaded roles. The agent authenticates with its own client
-credentials (audience `aegis-mcp`). The task id travels in `Aegis-Task-Id` and is a *selector*: it is
-honoured only if the stored delegation is bound to that authenticated agent in its tenant.
+on **every** tool call with freshly loaded roles.
+
+The agent never holds a token of its own. To start a run, the user's API token must carry the consent
+scope `delegate-<agent>`, which puts the agent client in the token's audience. The agent host exchanges
+that token at Keycloak (standard token exchange, RFC 8693, Keycloak 26.2) for a token with `sub` = the
+user, `azp` = the agent and `aud` = `aegis-mcp`. It verifies the result and records, server-side, that
+this token's `jti` (hashed) belongs to exactly one task (`agent_token_bindings`, insert-only, RLS). The
+MCP server accepts a tool call only if the token's user and agent match the stored delegation and its
+`jti` is bound to the task named in `Aegis-Task-Id`. Agent clients have no service account.
 
 **Alternatives.** (a) Forward the user's token to the MCP server — rejected: token passthrough, the
-user token's audience is the API. (b) OAuth 2.0 Token Exchange (RFC 8693) minting an `act`-claim token
-bound to the task — the strongest binding, supported by Keycloak 26.2 "standard token exchange", but
-adds configuration and claim-mapping surface; deferred to Phase 2. (c) Boolean "user approved" tool
-argument — rejected outright (MCP_SPEC approval rule).
+user token's audience is the API. (b) Agent client-credentials token + task id header (the original
+design) — replaced: anyone holding the agent secret could use any of the agent's tasks. (c) Task id in
+the token through Keycloak dynamic scopes (`aegis-task:<id>`) — rejected after testing: the feature is
+experimental in 26.2, and the agent could request a task scope the user's token did not contain, so the
+scope proved nothing beyond the server-side check. (d) Boolean "user approved" tool argument —
+rejected outright (MCP_SPEC approval rule).
 
-**Consequences.** Anyone holding agent-alpha's client secret can use any task delegated to agent-alpha
-(the secret is the agent's identity). Mitigations: per-agent least-privilege roles, short task TTL
-(≤1 h), revocation, rate limiting, audit. Token exchange would remove this gap.
+**Consequences.** A stolen agent secret alone yields no token, and cannot exchange an ordinary user token
+(no consent audience). A leaked agent token works only for its one task, for its one user, for at most
+300 s. Remaining gap: the agent host that performs the exchange is trusted to bind honestly, and
+Keycloak 26.2 does not add an `act` claim, so the agent appears only as `azp` (tested in
+`tests/security/test_agent_token_binding.py`).
 
 ## ADR-3: Audit durability and fail-closed semantics
 

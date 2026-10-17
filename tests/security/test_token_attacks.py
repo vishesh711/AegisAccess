@@ -57,7 +57,7 @@ def test_t04_expired_token(api: httpx.Client, kc: Keycloak, db: Evidence, record
 
 
 def test_t05_wrong_audience_tokens(api: httpx.Client, kc: Keycloak, db: Evidence, record: Any) -> None:
-    agent_token = kc.client_token("agent-alpha")  # aud=aegis-mcp
+    agent_token = kc.exchanged_token("alice")  # user-bound agent token, aud=aegis-mcp
     other_app = kc.password_token("alice", client="aegis-other-app")  # aud=other-service
     assert _parts(agent_token)[1]["aud"] == "aegis-mcp"
     assert _parts(other_app)[1]["aud"] == "other-service"

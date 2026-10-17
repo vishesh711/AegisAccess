@@ -46,7 +46,7 @@ PASSWORDS = {
 }
 CLIENT_SECRETS = {
     "agent-alpha": "dummy-agent-alpha-secret",
-    "agent-beta": "dummy-agent-beta-secret",
+    "agent-beta": "dummy-agent-beta-secret",  # agent-beta keeps a service account (misconfigured persona)
     "svc-reporter": "dummy-svc-reporter-secret",
 }
 SECADMIN_OTP_KEY = b"aegis-demo-otp-secret-dummy01"
@@ -164,6 +164,27 @@ class Keycloak:
             TOKEN_URL, data={"grant_type": "client_credentials"}, auth=(client, CLIENT_SECRETS[client])
         )
         assert resp.status_code == 200, f"client credentials failed for {client}"
+        token: str = resp.json()["access_token"]
+        self.issued.append(token)
+        return token
+
+    def consent_token(self, user: str, agent: str = "agent-alpha") -> str:
+        """User login that consents to delegation to ``agent`` (scope delegate-<agent>)."""
+        return self.password_token(user, scope=f"delegate-{agent}")
+
+    def exchanged_token(self, user: str, agent: str = "agent-alpha") -> str:
+        """RFC 8693 exchange by the agent client of the user's consent token. NOT bound to any task."""
+        resp = self.http.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "subject_token": self.consent_token(user, agent),
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            },
+            auth=(agent, CLIENT_SECRETS[agent]),
+        )
+        assert resp.status_code == 200, f"token exchange failed for {user}/{agent}: {resp.status_code}"
         token: str = resp.json()["access_token"]
         self.issued.append(token)
         return token
@@ -351,3 +372,38 @@ def captured_logs() -> Iterator[LogCapture]:
 
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def bound_agent_token(kc: Keycloak, user: str, task_id: str, agent: str = "agent-alpha") -> str:
+    """A per-task, user-bound agent token, produced by the PRODUCTION agent-host code path
+    (consent login -> Keycloak token exchange -> verification -> binding to the task)."""
+    import asyncio
+    import uuid as _uuid
+
+    from aegis.agent_tokens import issue_task_token
+    from aegis.delegation import load_delegation
+    from aegis.services import open_services
+
+    consent = kc.consent_token(user, agent)
+
+    async def go() -> str:
+        async with open_services(make_settings()) as services:
+            with psycopg.connect(OWNER_DSN) as conn:
+                row = conn.execute("SELECT tenant_id FROM tasks WHERE id = %s", (task_id,)).fetchone()
+            assert row is not None, "task not found"
+            delegation = await load_delegation(services.pool, tenant_id=row[0], task_id=_uuid.UUID(task_id))
+            assert delegation is not None
+            return await issue_task_token(
+                http=services.http,
+                pool=services.pool,
+                mcp_verifier=services.mcp_verifier,
+                token_endpoint=services.settings.token_endpoint,
+                client_id=agent,
+                client_secret=CLIENT_SECRETS[agent],
+                user_token=consent,
+                delegation=delegation,
+            )
+
+    token = asyncio.run(go())
+    kc.issued.append(token)
+    return token
