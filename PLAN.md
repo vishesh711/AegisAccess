@@ -170,7 +170,7 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 - [x] 1 Agent tokens via Keycloak standard token exchange, bound server-side to one task (T13)
 - [x] 2 Human approval for confidential agent writes: server-stored, digest-bound, single-use (T14, ADR-7)
 - [x] 5 External append-only audit store (VersityGW, COMPLIANCE lock, hash chain) + reconciliation (T15, ADR-8)
-- [ ] 4 Hardened profile: Keycloak TLS + PostgreSQL, auth code + PKCE, mTLS to OPA
+- [x] 4 Hardened profile: Keycloak TLS + PostgreSQL, auth code + PKCE, mTLS to OPA (ADR-9, tests/hardened)
 - [ ] 3 Optional real LLM planner behind the same tool boundary (off by default)
 
 ## 7. Test mapping

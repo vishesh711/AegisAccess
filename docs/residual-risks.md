@@ -14,10 +14,13 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
    retention could be shortened in testing, so safety relies on the per-object retention the shipper
    sets and the verifier checks. Reconciliation is detective: it runs on demand (`make audit-verify`,
    CI), with no alerting.
-4. **Local-demo IdP settings.** Keycloak `start-dev` (HTTP, H2), password grant for the CLI client,
-   `sslRequired=none`. Not acceptable in production.
+4. **Local-demo IdP settings in the default profile.** Keycloak `start-dev` (HTTP, file store), password
+   grant for the CLI client. The hardened profile (ADR-9) fixes these: HTTPS, PostgreSQL, PKCE, no
+   password grant. It still uses a throwaway local CA, and only its smaller suite runs against it.
 5. **Logical MCP audience** (`aegis-mcp`) instead of an RFC 8707 resource URI (ADR-4).
-6. **OPA channel** protected by a static bearer token, no mTLS; policy volume trusted, bundles unsigned.
+6. **OPA channel.** Default profile: static bearer token. Hardened profile: mutual TLS with a pinned
+   client-certificate subject (ADR-9). In both, the policy volume is trusted and bundles are unsigned.
+   API/MCP serve plain HTTP on 127.0.0.1 and DB connections are not TLS in either profile.
 7. **In-memory rate limiter** is per-process and resets on restart.
 8. **Side channels** (timing of cross-tenant vs nonexistent ids, search timing) not evaluated.
 9. **Model output integrity**: an agent can still produce a misleading summary from in-scope content;

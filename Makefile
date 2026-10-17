@@ -5,7 +5,7 @@ OPA_IMAGE := openpolicyagent/opa:1.4.2-static@sha256:3c995dc8a59f6ddfd92eb7404d2
 UV := uv run
 # Optional: AEGIS_EXTRA_CA=/path/ca.pem  (TLS-intercepting proxy during image build only)
 
-.PHONY: help install up down migrate seed lint test unit policy-test integration security-test sql-eval demo logs reset audit-deps audit-ship audit-verify
+.PHONY: help install up down migrate seed lint test unit policy-test integration security-test sql-eval demo logs reset audit-deps audit-ship audit-verify up-hardened seed-hardened hardened-test pki
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | sort | tr '\n' ' '; echo
@@ -21,7 +21,24 @@ up: .build/extra-ca.crt
 	$(COMPOSE) up -d --build --wait --wait-timeout 300
 
 down:
-	$(COMPOSE) down -v --remove-orphans
+	$(COMPOSE) -f infra/compose.hardened.yaml down -v --remove-orphans
+
+# Hardened profile (ADR-9): HTTPS-only Keycloak on PostgreSQL, PKCE logins, mutual TLS to OPA.
+COMPOSE_HARDENED := $(COMPOSE) -f infra/compose.hardened.yaml
+
+pki:
+	$(UV) python scripts/gen_pki.py
+	$(UV) python scripts/harden_realm.py
+
+up-hardened: .build/extra-ca.crt pki
+	$(COMPOSE_HARDENED) up -d --build --wait --wait-timeout 300
+
+# Principals are bound to (issuer, subject); the hardened Keycloak issues tokens as https://localhost:8443.
+seed-hardened:
+	AEGIS_OIDC_ISSUER=https://localhost:8443/realms/aegis $(MAKE) seed
+
+hardened-test:
+	$(UV) pytest tests/hardened -q -m hardened
 
 logs:
 	$(COMPOSE) logs --no-color --tail=200

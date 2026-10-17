@@ -1,0 +1,95 @@
+# Hardened profile overlay (ADR-9): `make up-hardened`. Same services, production-style transport:
+#   * Keycloak in production mode (`start`), HTTPS only, its own PostgreSQL database, a realm with
+#     sslRequired=all and no password grant (users log in with authorization code + PKCE);
+#   * OPA reachable only over mutual TLS (`--authentication=tls`); the PEPs present a client
+#     certificate, and system.authz accepts exactly that certificate subject;
+#   * API/MCP trust only the local demo CA for outbound TLS.
+# Certificates come from `scripts/gen_pki.py` (.build/pki, throwaway, DEMO ONLY). Still local-only:
+# every port binds to 127.0.0.1.
+
+x-pki: &pki ../.build/pki:/pki:ro
+
+x-hardened-app-env: &hardened-app-env
+  AEGIS_OIDC_ISSUER: https://localhost:8443/realms/aegis
+  AEGIS_OIDC_DISCOVERY_BASE: https://keycloak:8443/realms/aegis
+  AEGIS_TLS_CA_FILE: /pki/ca.crt
+  AEGIS_OPA_URL: https://opa:8181
+  AEGIS_OPA_AUTH: mtls
+  AEGIS_OPA_TOKEN: ""
+  AEGIS_OPA_CLIENT_CERT_FILE: /pki/pep.crt
+  AEGIS_OPA_CLIENT_KEY_FILE: /pki/pep.key
+
+services:
+  keycloak-db:
+    image: postgres:16.4-alpine@sha256:5660c2cbfea50c7a9127d17dc4e48543eedd3d7a41a595a2dfa572471e37e64c
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-dummy-keycloak-db-pw}
+      POSTGRES_DB: keycloak
+    volumes:
+      - kcdata:/var/lib/postgresql/data
+    ports: ["127.0.0.1:5433:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-dummy-keycloak-db-pw}
+      KC_HOSTNAME: https://localhost:8443
+      KC_HTTP_ENABLED: "false"
+      KC_HTTPS_PORT: "8443"
+      KC_HTTPS_CERTIFICATE_FILE: /pki/keycloak.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /pki/keycloak.key
+    volumes:
+      - ../.build/keycloak/aegis-realm-hardened.json:/opt/keycloak/data/import/aegis-realm.json:ro
+      - *pki
+    ports: !override ["127.0.0.1:8443:8443"]
+    depends_on:
+      keycloak-db: {condition: service_healthy}
+    healthcheck:
+      # The image has no TLS client; a listening HTTPS port means startup (incl. realm import) is done.
+      # The API's own readiness check then fetches the JWKS over verified TLS.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8443"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  opa:
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --tls-cert-file=/pki/opa.crt
+      - --tls-private-key-file=/pki/opa.key
+      - --tls-ca-cert-file=/pki/ca.crt
+      - --authentication=tls
+      - --authorization=basic
+      - --ignore=*_test.rego
+      - /policies
+    environment:
+      AEGIS_OPA_AUTH_MODE: tls
+      AEGIS_OPA_PEP_IDENTITY: CN=aegis-pep,O=AegisAccess demo
+      AEGIS_OPA_TOKEN: ""
+    volumes:
+      - *pki
+
+  api:
+    environment: *hardened-app-env
+    volumes:
+      - *pki
+
+  mcp-server:
+    environment: *hardened-app-env
+    volumes:
+      - *pki
+
+volumes:
+  kcdata:

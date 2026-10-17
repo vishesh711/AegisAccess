@@ -7,8 +7,9 @@ dummy value; production deployments must override them (and would not use this d
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,10 +31,12 @@ class Settings(BaseSettings):
     mcp_audience: str = "aegis-mcp"
     # Clients (``azp``) whose tokens the API accepts. Human logins + the workload client.
     api_allowed_clients: list[str] = Field(
-        default_factory=lambda: ["aegis-cli", "aegis-cli-short", "svc-reporter"]
+        default_factory=lambda: ["aegis-cli", "aegis-cli-short", "aegis-web", "svc-reporter"]
     )
     # Clients whose tokens represent humans (as opposed to workloads/agents).
-    human_login_clients: list[str] = Field(default_factory=lambda: ["aegis-cli", "aegis-cli-short"])
+    human_login_clients: list[str] = Field(
+        default_factory=lambda: ["aegis-cli", "aegis-cli-short", "aegis-web"]
+    )
     # Clients the MCP server accepts (registered agent identities only).
     mcp_allowed_clients: list[str] = Field(default_factory=lambda: ["agent-alpha", "agent-beta"])
     jwt_leeway_seconds: int = 0
@@ -45,6 +48,15 @@ class Settings(BaseSettings):
     opa_token: SecretStr = SecretStr("dummy-opa-pep-token")  # pragma: allowlist secret
     opa_timeout_seconds: float = 1.0
     policy_version: str = "policy-v2"
+    # "token": bearer token over the URL's scheme (local demo). "mtls": the PEP proves itself with a
+    # client certificate over HTTPS and sends no token (hardened profile; OPA --authentication=tls).
+    opa_auth: Literal["token", "mtls"] = "token"
+    opa_client_cert_file: str | None = None
+    opa_client_key_file: str | None = None
+
+    # CA bundle for outbound TLS (Keycloak, OPA). When set it REPLACES the system trust store, so only
+    # that CA is trusted (hardened profile: the local demo CA).
+    tls_ca_file: str | None = None
 
     # MCP server identity (resource indicator advertised in protected-resource metadata).
     mcp_resource_url: str = "http://localhost:8001/mcp"
@@ -64,6 +76,21 @@ class Settings(BaseSettings):
     # Limits.
     max_task_ttl_seconds: int = 3600
     max_summary_chars: int = 2000
+
+    @model_validator(mode="after")
+    def _mtls_is_complete(self) -> Self:
+        """Fail at startup rather than silently talking to OPA without the configured protection."""
+        if self.opa_auth == "mtls":
+            missing = [
+                name
+                for name in ("opa_client_cert_file", "opa_client_key_file", "tls_ca_file")
+                if not getattr(self, name)
+            ]
+            if missing or not self.opa_url.startswith("https://"):
+                raise ValueError(
+                    f"opa_auth=mtls needs an https opa_url and {', '.join(missing) or 'nothing else'}"
+                )
+        return self
 
     @property
     def discovery_base(self) -> str:

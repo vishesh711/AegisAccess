@@ -57,5 +57,6 @@ testpaths = ["tests"]
 markers = [
     "integration: requires the compose stack (keycloak, postgres, opa)",
     "security: mandatory attack scenario",
+    "hardened: needs the hardened profile (make up-hardened); run with make hardened-test",
 ]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m 'not hardened'"

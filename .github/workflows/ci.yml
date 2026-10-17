@@ -69,3 +69,24 @@ jobs:
         run: make logs
       - if: always()
         run: make down
+
+  hardened:
+    # Hardened profile (ADR-9): HTTPS-only Keycloak on PostgreSQL, PKCE logins, mutual TLS to OPA.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: lint
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --frozen
+      - name: Start hardened stack (generates a throwaway local CA)
+        run: make up-hardened
+      - run: make migrate seed-hardened
+      - name: Transport, PKCE and mTLS checks, plus allow/deny/agent run through them
+        run: make hardened-test
+      - name: Compose logs on failure
+        if: failure()
+        run: make logs
+      - if: always()
+        run: make down
+

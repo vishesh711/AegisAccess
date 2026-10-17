@@ -99,8 +99,13 @@ JWKS loadable) on both API and MCP server. Readiness exposes booleans only.
 
 ## Local-demo vs production boundaries
 
-* Keycloak runs `start-dev` over plain HTTP with an H2 store; users log in with the password grant
-  (demo convenience). Production: TLS everywhere, authorization code + PKCE, a real Keycloak DB.
-* OPA is a sidecar-style service on the compose network protected by a bearer token and
-  `system.authz`; production would use mTLS and bundle signing.
+* Default profile (`make up`): Keycloak runs `start-dev` over plain HTTP with a file store, and the
+  test personas log in with the password grant (fast, scriptable). OPA is protected by a bearer token
+  and `system.authz`.
+* Hardened profile (`make up-hardened seed-hardened hardened-test`, ADR-9, `infra/compose.hardened.yaml`):
+  Keycloak in production mode, HTTPS only, realm stored in its own PostgreSQL, `sslRequired=all`,
+  password grant disabled, logins via authorization code + PKCE (S256 enforced) on `aegis-web`; OPA only
+  over mutual TLS, accepting exactly the PEP certificate subject; API/MCP trust only the local demo CA.
+* Still not production in either profile: the CA is a throwaway local one, API/MCP serve plain HTTP on
+  127.0.0.1, Keycloak's and the app's database connections are not TLS, and OPA bundles are unsigned.
 * Secrets are dummy values in `.env.example` / realm JSON.

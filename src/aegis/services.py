@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import ssl
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 
 import httpx
@@ -45,9 +46,33 @@ class Services:
         }
 
 
+def tls_verify(settings: Settings) -> ssl.SSLContext | bool:
+    """Outbound TLS trust: only the configured CA when set, otherwise the system store."""
+    if settings.tls_ca_file:
+        return ssl.create_default_context(cafile=settings.tls_ca_file)
+    return True
+
+
+def opa_http_client(settings: Settings) -> httpx.AsyncClient:
+    """Dedicated client for OPA. In mtls mode it presents the PEP client certificate."""
+    verify = tls_verify(settings)
+    if settings.opa_auth == "mtls":
+        cert, key = settings.opa_client_cert_file, settings.opa_client_key_file
+        if not isinstance(verify, ssl.SSLContext) or not cert or not key:
+            raise ValueError("opa_auth=mtls requires tls_ca_file and a client certificate and key")
+        verify.load_cert_chain(cert, key)
+    return httpx.AsyncClient(verify=verify, timeout=settings.opa_timeout_seconds, follow_redirects=False)
+
+
 @asynccontextmanager
 async def open_services(settings: Settings) -> AsyncIterator[Services]:
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, follow_redirects=False) as http:
+    async with AsyncExitStack() as stack:
+        http = await stack.enter_async_context(
+            httpx.AsyncClient(
+                verify=tls_verify(settings), timeout=settings.http_timeout_seconds, follow_redirects=False
+            )
+        )
+        opa_http = await stack.enter_async_context(opa_http_client(settings))
         pool = create_pool(settings.database_url.get_secret_value())
         await pool.open(wait=False)
         try:
@@ -75,9 +100,9 @@ async def open_services(settings: Settings) -> AsyncIterator[Services]:
             )
             pdp = OpaClient(
                 base_url=settings.opa_url,
-                token=settings.opa_token.get_secret_value(),
+                token=settings.opa_token.get_secret_value() if settings.opa_auth == "token" else None,
                 timeout_seconds=settings.opa_timeout_seconds,
-                client=http,
+                client=opa_http,
             )
             audit = PgAuditSink(pool)
             enforcer = Enforcer(

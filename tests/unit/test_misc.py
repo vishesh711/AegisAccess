@@ -121,3 +121,53 @@ def test_task_id_parsing() -> None:
     assert parse_task_id("x" * 100) is None
     u = uuid.uuid4()
     assert parse_task_id(str(u)) == u
+
+
+def test_mtls_settings_fail_at_startup_when_incomplete() -> None:
+    """opa_auth=mtls never silently degrades to an unauthenticated or plain-HTTP OPA channel."""
+    import pytest
+    from pydantic import ValidationError
+
+    from aegis.config import Settings
+
+    full = {
+        "opa_auth": "mtls",
+        "opa_url": "https://opa:8181",
+        "tls_ca_file": "/pki/ca.crt",
+        "opa_client_cert_file": "/pki/pep.crt",
+        "opa_client_key_file": "/pki/pep.key",
+    }
+    assert Settings(**full).opa_auth == "mtls"
+    for missing in ("tls_ca_file", "opa_client_cert_file", "opa_client_key_file"):
+        with pytest.raises(ValidationError):
+            Settings(**{k: v for k, v in full.items() if k != missing})
+    with pytest.raises(ValidationError):
+        Settings(**{**full, "opa_url": "http://opa:8181"})
+    with pytest.raises(ValidationError):
+        Settings(**{**full, "opa_auth": "none"})
+    assert Settings().opa_auth == "token"  # local demo default unchanged
+
+
+def test_opa_client_sends_no_bearer_in_mtls_mode() -> None:
+    import httpx
+
+    from aegis.pdp import OpaClient
+
+    seen: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(200, json={"result": False})
+
+    async def go() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            for token in (None, "dummy-opa-pep-token-0123"):
+                await OpaClient(base_url="https://opa", token=token, timeout_seconds=1, client=client).decide(
+                    {}
+                )
+
+    import asyncio
+
+    asyncio.run(go())
+    assert "authorization" not in seen[0]
+    assert seen[1]["authorization"] == "Bearer dummy-opa-pep-token-0123"

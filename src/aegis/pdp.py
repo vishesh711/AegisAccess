@@ -29,10 +29,11 @@ class PdpResult:
 
 class OpaClient:
     def __init__(
-        self, *, base_url: str, token: str, timeout_seconds: float, client: httpx.AsyncClient
+        self, *, base_url: str, token: str | None, timeout_seconds: float, client: httpx.AsyncClient
     ) -> None:
+        """``token`` is None in mutual-TLS mode: the client certificate on ``client`` authenticates."""
         self._base = base_url.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {token}"}
+        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
         self._timeout = httpx.Timeout(timeout_seconds)
         self._client = client
 

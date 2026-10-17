@@ -184,3 +184,57 @@ object lock (for example S3 Object Lock) in a separate account.
 - On a full test run, the activity checks reported only the deliberate cases above, plus the existing
   test that calls the adapter directly, plus four warnings from the T14 concurrency test (allowed, then
   denied because another request had already used the approval).
+
+## ADR-9: Hardened profile (TLS, PKCE, mutual TLS to OPA)
+
+**Context.** The default profile favours a scriptable demo: plain-HTTP Keycloak on a file store,
+password-grant logins, and a static bearer token protecting OPA (residual risks #4 and #6).
+
+**Decision.** An overlay, `infra/compose.hardened.yaml`, changes only transport and login, never the
+authorization logic:
+- `scripts/gen_pki.py` creates a throwaway local CA (ECDSA P-256, 30 days, via the `cryptography` X.509
+  builder) with server certificates for Keycloak and OPA and a client certificate `CN=aegis-pep`.
+- Keycloak runs `start` (production mode): HTTPS only on 8443, its own PostgreSQL (`keycloak-db`).
+  `scripts/harden_realm.py` derives the realm with `sslRequired=all` and the password grant disabled
+  on every client.
+- Humans log in through the public client `aegis-web` with authorization code + PKCE (S256 enforced)
+  and a loopback redirect (RFC 8252). The client is also in the default realm, so both profiles
+  support it. `src/aegis/pkce_client.py` performs the browser steps for the demo personas.
+- OPA runs `--authentication=tls --authorization=basic`. `system.authz` chooses its identity check
+  from `AEGIS_OPA_AUTH_MODE`, never from the request. In `tls` mode the verified certificate subject
+  must equal `AEGIS_OPA_PEP_IDENTITY`; in `token` mode, a bearer string that looks like a subject is
+  just a wrong token (Rego test). Any other mode authenticates nobody.
+- The PEPs use a dedicated OPA HTTP client that presents the client certificate and sends no bearer
+  token. `opa_auth=mtls` without an https URL, CA, certificate or key fails at startup.
+  `tls_ca_file` replaces the system trust store, so only the demo CA is trusted.
+- Principals are bound to (issuer, subject), so the hardened stack is seeded with its https issuer
+  (`make seed-hardened`).
+
+**Measured (this environment, `make hardened-test`, 8 tests).**
+- Discovery works over HTTPS with the demo CA, fails against the system trust store, and nothing
+  answers on plain HTTP.
+- The realm is in PostgreSQL with `ssl_required=ALL`.
+- The password grant returns `unauthorized_client`.
+- Missing PKCE and `plain` PKCE are refused at the authorization endpoint; a missing or wrong
+  `code_verifier` is refused at the token endpoint.
+- OPA:
+  - refuses the TLS handshake with no client certificate, or one from another CA;
+  - answers 401/403 for a certificate from the right CA with another subject;
+  - serves decisions to the PEP certificate, but refuses it policy writes and raw data reads.
+- Through all this, a PKCE login still gets allow (with one side effect), deny (with none, OPA status
+  `ok`) and a full agent run from a PKCE consent login (injected payroll read denied, one report
+  written).
+- Mutation check: letting `system.authz` accept any certificate subject fails both the live test and
+  a Rego test.
+
+**Alternatives rejected.** Keycloak client-certificate auth for users (not what PKCE demonstrates);
+a service mesh for mTLS (new infrastructure, out of scope); keeping the password grant in the hardened
+realm (it is what the profile removes).
+
+**Consequences / not covered.** The CA and keys are local throwaway files, readable by the containers
+(and anyone on the host). API and MCP still serve plain HTTP on 127.0.0.1, and the API→MCP hop is plain
+HTTP on the compose network. Database connections are not TLS, OPA bundles are unsigned, and the
+Keycloak health check is a TCP probe (the image has no TLS client). The full attack suite runs on the
+default profile; the hardened suite covers transport and login, plus representative allow, deny and
+agent paths.
+
