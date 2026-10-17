@@ -90,9 +90,40 @@ not hold. The corpus runs as `make security-test` (pytest + recorder) and writes
 ## ADR-6: Policy facts vs policy rules
 
 **Decision.** Identity facts (principals, roles, delegations, active flags) in PostgreSQL; rules (what
-a role may do per kind/classification/department) in Rego data under version `policy-v1`. Token
+a role may do per kind/classification/department) in Rego data under a version id (now `policy-v2`). Token
 claims are used only for authentication. The PEP sends its expected policy version; OPA denies on
 mismatch, and readiness fails if OPA serves a different version.
 
 **Consequences.** Role changes take effect on the next request without token refresh; policy changes
 are code-reviewed and tested with `opa test`.
+
+## ADR-7: Human approval for sensitive agent writes
+
+**Context.** MCP_SPEC asks for approval of sensitive tool calls and PRD scenario P1 asks that an approval
+cannot be replayed. An approval flag in tool arguments, or a prompt asking the model to "confirm", would be
+controlled by the agent and is no control at all.
+
+**Decision.**
+- The policy denies `reports:create` from MCP with `APPROVAL_REQUIRED` when the report is confidential or
+  restricted (a report takes the highest classification of its source documents) unless the PEP passes
+  `approval.valid = true`. This is a deny-only contextual rule: approval never adds a grant the
+  user ∩ agent ∩ task intersection lacks.
+- On that deny, the tool server stores a pending row in `approvals` bound to tenant, task, delegating user,
+  agent, action and the sha256 of the canonical JSON of the arguments (task id, sorted document ids, summary
+  text). The agent gets only the approval id.
+- Only the delegating human approves, through `POST /api/v1/approvals/{id}/approve` with their own API
+  token. Pending requests expire after 10 minutes, granted approvals 5 minutes after the decision.
+- The approval is consumed with a conditional `UPDATE ... WHERE consumed_at IS NULL` in the **same
+  transaction** as the report insert. A replay, a concurrent duplicate or changed arguments find no usable
+  approval and are denied with no write.
+- The runtime role may only update the decision and consumption columns; it cannot change the digest,
+  approver or task of an approval.
+
+**Alternatives rejected.** Approval as a token claim or scope (the agent host holds the user's consent token,
+and a claim is not single-use); approval inside OPA data (OPA should stay stateless; consumption must be
+atomic with the write, which only the database can do).
+
+**Evidence.** `tests/security/test_approvals.py` (T14: single use + replay, tampered arguments, wrong
+approver, rejected and expired, five concurrent uses -> one write, full agent run, `approved` argument),
+approval tests in `policies/authz_test.rego`. Mutation checks: removing consumption, consuming outside the write
+transaction, or ignoring the digest each make T14 fail.

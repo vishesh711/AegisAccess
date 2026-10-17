@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from aegis.agent_tokens import load_binding
+from aegis.approvals import ApprovalNotUsableError, args_digest, find_usable, request_approval
 from aegis.db import Conn
 from aegis.delegation import TaskDelegation, load_delegation, parse_task_id
 from aegis.identity import Principal
@@ -29,6 +30,8 @@ from aegis.resources import DocumentStore, ResourceMeta, get_metadata, valid_res
 
 log = logging.getLogger("aegis.tools")
 
+CLASSIFICATION_ORDER = ["public", "internal", "confidential", "restricted"]
+SENSITIVE_CLASSIFICATIONS = frozenset({"confidential", "restricted"})
 MAX_QUERY_CHARS = 100
 MAX_RESULTS = 10
 MAX_SUMMARY_DOCS = 10
@@ -63,10 +66,11 @@ class ExportOut(BaseModel):
 
 
 class ToolDeniedError(Exception):
-    """Sanitized denial: carries only a public reason and the request id."""
+    """Sanitized denial: carries only a public reason, the request id and (optionally) a safe detail."""
 
-    def __init__(self, public_reason: str, request_id: uuid.UUID) -> None:
-        super().__init__(f"{public_reason} (request_id={request_id})")
+    def __init__(self, public_reason: str, request_id: uuid.UUID, detail: str | None = None) -> None:
+        extra = f", {detail}" if detail else ""
+        super().__init__(f"{public_reason} (request_id={request_id}{extra})")
         self.public_reason = public_reason
         self.request_id = request_id
 
@@ -190,7 +194,11 @@ class ToolGateway:
         return _Ctx(caller=caller, meta=meta, delegation=delegation, user=user)
 
     async def _authorize(
-        self, ctx: _Ctx, action: str, resource: ResourceMeta | PolicyResource | None
+        self,
+        ctx: _Ctx,
+        action: str,
+        resource: ResourceMeta | PolicyResource | None,
+        approval: bool | None = None,
     ) -> Decision:
         return await self._enforcer.authorize(
             ctx.meta,
@@ -199,6 +207,7 @@ class ToolGateway:
             resource=resource,
             agent=ctx.caller.agent,
             delegation=ctx.delegation.to_input(agent=ctx.caller.agent),
+            approval=approval,
         )
 
     async def _executed(self, ctx: _Ctx, action: str, resource_id: str | None, outcome: str) -> None:
@@ -294,31 +303,82 @@ class ToolGateway:
             raise await self._deny(caller, caller.meta, "INVALID_ARGUMENTS", action=action)
         ctx = await self._context(caller, task_id, action)
         # Every source document must itself be readable under the same intersection.
+        levels = ["internal"]
         for doc_id in document_ids:
             res = await get_metadata(self._pool, doc_id) if valid_resource_id(doc_id) else None
             d = await self._authorize(ctx, "documents:read", res)
-            if not d.allow:
+            if not d.allow or res is None:
                 raise ToolDeniedError(d.public_reason, d.request_id)
+            levels.append(res.classification)
+        # A report is as sensitive as its most sensitive source.
         report_res = PolicyResource(
             id=f"report:{ctx.delegation.task_id}"[:80],
             tenant_id=ctx.delegation.tenant_id,
             kind="report",
-            classification="internal",
+            classification=max(levels, key=CLASSIFICATION_ORDER.index),
             department="*",
         )
-        decision = await self._authorize(ctx, action, report_res)
+        # Approval binds to these exact arguments; any change to them needs a new approval.
+        digest = args_digest(
+            action, {"task_id": task_id, "document_ids": sorted(document_ids), "summary_text": summary_text}
+        )
+        sensitive = report_res.classification in SENSITIVE_CLASSIFICATIONS
+        approval_id = (
+            await find_usable(
+                self._pool,
+                tenant_id=ctx.delegation.tenant_id,
+                task_id=ctx.delegation.task_id,
+                digest=digest,
+                approver_id=ctx.user.id,
+            )
+            if sensitive
+            else None
+        )
+        decision = await self._authorize(
+            ctx, action, report_res, approval=(approval_id is not None) if sensitive else None
+        )
         if not decision.allow:
+            if decision.reason_codes == ("APPROVAL_REQUIRED",):
+                request_id = await request_approval(
+                    self._pool,
+                    tenant_id=ctx.delegation.tenant_id,
+                    task_id=ctx.delegation.task_id,
+                    approver_id=ctx.user.id,
+                    agent_id=ctx.caller.agent.id,
+                    action=action,
+                    digest=digest,
+                    description=(
+                        f"{ctx.caller.agent.id} wants to create a {report_res.classification} report"
+                        f" from {', '.join(sorted(document_ids))}; summary {len(summary_text)} chars,"
+                        f" args sha256 {digest[:12]}"
+                    ),
+                )
+                raise ToolDeniedError(
+                    "APPROVAL_REQUIRED", decision.request_id, detail=f"approval_id={request_id}"
+                )
             raise ToolDeniedError(decision.public_reason, decision.request_id)
         clean = "".join(ch for ch in summary_text if ch.isprintable() or ch in "\n\t")
-        report_id = await self._store.create_report(
-            tenant_id=ctx.delegation.tenant_id,
-            task_id=ctx.delegation.task_id,
-            agent_id=ctx.caller.agent.id,
-            on_behalf_of_id=ctx.user.id,
-            source_document_ids=document_ids,
-            summary_text=clean,
-            correlation_id=ctx.meta.correlation_id,
-        )
+        try:
+            report_id = await self._store.create_report(
+                tenant_id=ctx.delegation.tenant_id,
+                task_id=ctx.delegation.task_id,
+                agent_id=ctx.caller.agent.id,
+                on_behalf_of_id=ctx.user.id,
+                source_document_ids=document_ids,
+                summary_text=clean,
+                correlation_id=ctx.meta.correlation_id,
+                consume_approval=(approval_id, digest) if approval_id else None,
+            )
+        except ApprovalNotUsableError:
+            # Lost a race (already consumed or expired since lookup): nothing was written.
+            raise await self._deny(
+                caller,
+                ctx.meta,
+                "APPROVAL_NOT_USABLE",
+                action=action,
+                task_id=ctx.delegation.task_id,
+                subject=ctx.user,
+            ) from None
         await self._executed(ctx, action, report_res.id, "success")
         return ReportOut(report_id=str(report_id), status="created")
 

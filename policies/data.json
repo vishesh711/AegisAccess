@@ -1,7 +1,11 @@
 {
   "aegis": {
-    "policy_version": "policy-v1",
-    "allowed_environments": ["local", "test", "ci"],
+    "policy_version": "policy-v2",
+    "allowed_environments": [
+      "local",
+      "test",
+      "ci"
+    ],
     "actions": [
       "documents:read",
       "documents:search",
@@ -12,40 +16,50 @@
     ],
     "roles": {
       "engineer": {
-        "principal_types": ["human"],
+        "principal_types": [
+          "human"
+        ],
         "grants": [
-          {"action": "documents:read", "kinds": ["document"], "classifications": ["public", "internal"], "departments": ["engineering"]},
-          {"action": "documents:search", "kinds": ["document"], "classifications": ["public", "internal"], "departments": ["engineering"]},
-          {"action": "reports:create", "kinds": ["report"], "classifications": ["internal"], "departments": ["*"]}
+          {"action": "documents:read", "kinds": [ "document" ], "classifications": [ "public", "internal" ], "departments": [ "engineering" ]},
+          {"action": "documents:search", "kinds": [ "document" ], "classifications": [ "public", "internal" ], "departments": [ "engineering" ]},
+          {"action": "reports:create", "kinds": [ "report" ], "classifications": [ "internal" ], "departments": [ "*" ]}
         ]
       },
       "finance-analyst": {
-        "principal_types": ["human"],
+        "principal_types": [
+          "human"
+        ],
         "grants": [
-          {"action": "documents:read", "kinds": ["document"], "classifications": ["public", "internal", "confidential", "restricted"], "departments": ["finance"]},
-          {"action": "documents:search", "kinds": ["document"], "classifications": ["public", "internal", "confidential", "restricted"], "departments": ["finance"]},
-          {"action": "reports:create", "kinds": ["report"], "classifications": ["internal"], "departments": ["*"]}
+          {"action": "documents:read", "kinds": [ "document" ], "classifications": [ "public", "internal", "confidential", "restricted" ], "departments": [ "finance" ]},
+          {"action": "documents:search", "kinds": [ "document" ], "classifications": [ "public", "internal", "confidential", "restricted" ], "departments": [ "finance" ]},
+          {"action": "reports:create", "kinds": [ "report" ], "classifications": [ "internal", "confidential" ], "departments": [ "*" ]}
         ]
       },
       "security-admin": {
-        "principal_types": ["human"],
+        "principal_types": [
+          "human"
+        ],
         "grants": [
-          {"action": "audit:read", "kinds": ["audit_log"], "classifications": ["confidential"], "departments": ["*"]},
-          {"action": "policy:simulate", "kinds": ["policy"], "classifications": ["confidential"], "departments": ["*"]}
+          {"action": "audit:read", "kinds": [ "audit_log" ], "classifications": [ "confidential" ], "departments": [ "*" ]},
+          {"action": "policy:simulate", "kinds": [ "policy" ], "classifications": [ "confidential" ], "departments": [ "*" ]}
         ]
       },
       "workload-reporter": {
-        "principal_types": ["workload"],
+        "principal_types": [
+          "workload"
+        ],
         "grants": [
-          {"action": "documents:read", "kinds": ["document"], "classifications": ["public", "internal"], "departments": ["engineering"]}
+          {"action": "documents:read", "kinds": [ "document" ], "classifications": [ "public", "internal" ], "departments": [ "engineering" ]}
         ]
       },
       "agent-document-assistant": {
-        "principal_types": ["agent"],
+        "principal_types": [
+          "agent"
+        ],
         "grants": [
-          {"action": "documents:read", "kinds": ["document"], "classifications": ["public", "internal", "confidential"], "departments": ["engineering", "finance"]},
-          {"action": "documents:search", "kinds": ["document"], "classifications": ["public", "internal", "confidential"], "departments": ["engineering", "finance"]},
-          {"action": "reports:create", "kinds": ["report"], "classifications": ["internal"], "departments": ["*"]}
+          {"action": "documents:read", "kinds": [ "document" ], "classifications": [ "public", "internal", "confidential" ], "departments": [ "engineering", "finance" ]},
+          {"action": "documents:search", "kinds": [ "document" ], "classifications": [ "public", "internal", "confidential" ], "departments": [ "engineering", "finance" ]},
+          {"action": "reports:create", "kinds": [ "report" ], "classifications": [ "internal", "confidential" ], "departments": [ "*" ]}
         ]
       }
     }

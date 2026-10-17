@@ -23,13 +23,14 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 11. **GitHub Actions** are pinned to commit SHAs; updating them is a manual step (no Dependabot configured).
 12. **Container scan** fails the build only on fixable CRITICAL findings; HIGH findings (44 on the last
     scan, all in the Debian base image) are reported, not blocking.
-13. **Single-use approval workflow** (MCP_SPEC approval rule, PRD replay scenario P1) is not implemented,
-    so no tool requires approval and no approval can be replayed.
+13. **Approval scope.** Only agent report writes classified confidential or higher need human approval
+    (ADR-7). The approver sees a server-written description and the argument digest, not a rendered diff
+    of the summary text, and there is no approval UI: approvals go through the API. A user who approves
+    without reading is not protected against.
 14. **Caller-supplied correlation id.** The MCP server accepts `Aegis-Correlation-Id` (UUID-validated) so an
     agent run can be traced end to end. It never affects authorization, but a malicious agent could reuse
     another run's id to muddy correlation; `request_id` is always server-generated.
 
 ## Deferred (Phase 2, per PRD §12)
-Go gateway; `act`-claim delegation chains; human approval workflow with nonce and argument
-digest binding; mTLS workload identity; risk-adaptive access / device posture; security dashboard;
+Go gateway; `act`-claim delegation chains; an approval UI; mTLS workload identity; risk-adaptive access / device posture; security dashboard;
 external audit sink; load testing with high-cardinality data.

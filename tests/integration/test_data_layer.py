@@ -139,6 +139,6 @@ def test_opa_rejects_policy_replacement_even_with_pep_token() -> None:
     assert r.status_code in (401, 403)
     # and the real policy is unchanged
     ok = httpx.get(f"{OPA_URL}/v1/data/aegis/authz/policy_version", headers=headers)
-    assert ok.json()["result"] == "policy-v1"
+    assert ok.json()["result"] == "policy-v2"
     deny = httpx.post(f"{OPA_URL}/v1/data/aegis/authz/allow", json={"input": {}}, headers=headers)
     assert deny.json() == {"result": False}

@@ -16,6 +16,7 @@ from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
+from aegis.approvals import consume
 from aegis.db import Conn, tenant_transaction, transaction
 
 RESOURCE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
@@ -169,10 +170,17 @@ class DocumentStore:
         source_document_ids: list[str],
         summary_text: str,
         correlation_id: uuid.UUID,
+        consume_approval: tuple[uuid.UUID, str] | None = None,
     ) -> uuid.UUID:
+        """Write a report. ``consume_approval`` = (approval id, args digest): the approval is consumed in the
+        SAME transaction, so a report is never written without using up its single-use approval."""
         self.calls["create_report"] += 1
         report_id = uuid.uuid4()
         async with tenant_transaction(self._pool, tenant_id) as conn:
+            if consume_approval is not None:
+                await consume(
+                    conn, approval_id=consume_approval[0], tenant_id=tenant_id, digest=consume_approval[1]
+                )
             await conn.execute(
                 "INSERT INTO reports (id, tenant_id, task_id, created_by_agent_id, on_behalf_of_id, "
                 "source_document_ids, summary_text) VALUES (%s, %s, %s, %s, %s, %s, %s)",

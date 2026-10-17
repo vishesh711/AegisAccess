@@ -1,10 +1,10 @@
 # AegisAccess security test report
 
-* Generated: 2026-10-16T19:59:12+00:00
-* Git revision: `7eeab1e`
-* Run id (scenario_results.run_id): `6bd7e89f-d016-4fb6-a136-208c4357e641`
+* Generated: 2026-10-17T00:26:11+00:00
+* Git revision: `2d918c0` (working tree has uncommitted changes)
+* Run id (scenario_results.run_id): `f11d508a-3c99-4333-adb0-652a84ad9093`
 * pytest exit status for `tests/security`: **0** (0 = all tests passed)
-* Scenarios recorded: 28; outcome mismatches: 0; mandatory T01-T12 missing: none
+* Scenarios recorded: 33; outcome mismatches: 0; mandatory T01-T12 missing: none
 
 Side-effect counts are **observed** rows in `resource_side_effects` (written by the resource adapter in
 the same transaction as the protected operation), read back from PostgreSQL after each request — not
@@ -13,8 +13,8 @@ inferred from HTTP status codes. Audit counts are rows in the append-only `audit
 | Scenario | Description | Request | Expected | Actual | Side effects (exp/obs) | Audit rows | Result |
 |---|---|---|---|---|---|---|---|
 | AUDIT-IMMUTABLE | Runtime DB role attempts UPDATE/DELETE/TRUNCATE on audit | `aegis_app: UPDATE/DELETE/TRUNCATE audit_events` | deny | deny | 0/0 | 0 | PASS |
-| AUDIT-SECRECY | Scan of 1018 audit rows for tokens/secrets/canaries | `SELECT * FROM audit_events` | clean | clean | 0/0 | 1018 | PASS |
-| LOG-SECRECY | Scan of 5598 raw log records | `captured application/library logs` | clean | clean | 0/0 | 0 | PASS |
+| AUDIT-SECRECY | Scan of 1979 audit rows for tokens/secrets/canaries | `SELECT * FROM audit_events` | clean | clean | 0/0 | 1979 | PASS |
+| LOG-SECRECY | Scan of 9611 raw log records | `captured application/library logs` | clean | clean | 0/0 | 0 | PASS |
 | T01 | Alice reads alpha engineering document | `GET /api/v1/resources/doc-alpha-eng (alice token)` | allow | allow | 1/1 | 2 | PASS |
 | T02 | Alice (engineer) reads restricted payroll | `GET /api/v1/resources/doc-alpha-payroll (alice token)` | deny | deny | 0/0 | 1 | PASS |
 | T03 | Alice guesses beta tenant document id (IDOR) | `GET /api/v1/resources/doc-beta-eng (alice token)` | deny | deny | 0/0 | 1 | PASS |
@@ -39,12 +39,17 @@ inferred from HTTP status codes. Audit counts are rows in the append-only `audit
 | T11-unreachable | OPA connection refused | `GET doc-alpha-eng (alice)` | deny | deny | 0/0 | 1 | PASS |
 | T12 | Spoofed tenant/user/role headers + query params | `GET payroll / beta doc / audit with X-Tenant-Id, X-User-Id, X-Roles, ?tenant_id=...` | deny | deny | 0/0 | 1 | PASS |
 | T12-mcp | Identity/role/approval fields injected into MCP tool arguments | `documents.read(doc-alpha-payroll, user_id=bob \| tenant_id=beta \| role=... \| approved=true)` | deny | deny | 0/0 | 6 | PASS |
+| T13-binding | Unbound token; token bound to another task; another user's bound token | `documents.read(doc-alpha-eng) x3` | deny | deny | 0/0 | 2 | PASS |
+| T13-own-token | Agent's own client-credentials token at the MCP server | `documents.read(doc-beta-eng) with agent-beta's own token` | deny | deny | 0/0 | 1 | PASS |
+| T13-secret | Stolen agent secret: client credentials, exchange of a non-consent user token, exchange of another agent's consent token | `Keycloak token endpoint x3` | refused | refused | 0/0 | 0 | PASS |
+| T14-replay | Approved sensitive write executes once; identical replay is denied | `reports.create_summary(confidential) x2 after one approval` | allow,deny | allow,deny | 1/1 | 0 | PASS |
+| T14-tamper | Approval for one summary text used with different text | `reports.create_summary with modified summary_text` | deny | deny | 0/0 | 0 | PASS |
 | X-INACTIVE | Deactivated employee with valid IdP session | `GET doc-alpha-eng (dave token)` | deny | deny | 0/0 | 1 | PASS |
 
 ## Policy decision latency (measured, not a guarantee)
 
-From `audit_events.duration_ms` of successful OPA evaluations accumulated in this database (n=568).
-p50 = 5.07 ms, p95 = 8.16 ms, max = 118.67 ms.
+From `audit_events.duration_ms` of successful OPA evaluations accumulated in this database (n=1218).
+p50 = 4.33 ms, p95 = 8.55 ms, max = 19.34 ms.
 Environment: Linux-6.18.44-fc-v139-x86_64-with-glibc2.39, Python 3.12.3, OPA in Docker on the same host,
 PEP->OPA over the local Docker bridge/loopback. Includes HTTP round trip; excludes JWT validation and DB.
 The PRD target (p95 < 100 ms) is aspirational for local runs; this sample is not a load test.

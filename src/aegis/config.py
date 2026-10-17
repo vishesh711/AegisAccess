@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     opa_url: str = "http://127.0.0.1:8181"
     opa_token: SecretStr = SecretStr("dummy-opa-pep-token")  # pragma: allowlist secret
     opa_timeout_seconds: float = 1.0
-    policy_version: str = "policy-v1"
+    policy_version: str = "policy-v2"
 
     # MCP server identity (resource indicator advertised in protected-resource metadata).
     mcp_resource_url: str = "http://localhost:8001/mcp"

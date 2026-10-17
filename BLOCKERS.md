@@ -11,5 +11,5 @@ here is claimed as working.
 | Image build in the sandbox | Environment-specific | Building needed `AEGIS_BUILD_NETWORK=host AEGIS_BUILD_HTTPS_PROXY=$HTTPS_PROXY AEGIS_EXTRA_CA=<proxy CA>`. On a normal workstation/CI none of these are needed (defaults). |
 | Docker daemon | Environment-specific | The sandbox had no running daemon; it was started manually with `dockerd`. |
 | Real LLM adapter | Not implemented (optional in spec) | Only the deterministic planner exists; no paid LLM was used. |
-| Approval workflow / approval replay scenario (P1) | Not implemented | See `docs/residual-risks.md` #13. |
+| Approval workflow / approval replay scenario (P1) | **Implemented and tested** | Confidential agent report writes need a server-stored, single-use approval from the delegating user, bound to an argument digest (ADR-7). Covered by T14 in `tests/security/test_approvals.py`. |
 | `POST /api/v1/scenarios/{id}/run` | Not implemented by design | See ADR-5; replaced by `make security-test`. |

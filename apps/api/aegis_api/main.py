@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aegis.agent_client import McpToolClient
 from aegis.agent_tokens import AgentTokenError, consent_scope, issue_task_token
+from aegis.approvals import decide, list_for_approver
 from aegis.authn import JwksUnavailableError, TokenValidationError, VerifiedToken, bearer_from_header
 from aegis.config import Settings, get_settings
 from aegis.db import tenant_transaction, transaction
@@ -31,6 +32,7 @@ from aegis.services import Services, open_services
 
 log = logging.getLogger("aegis.api")
 
+_APPROVAL_RE = re.compile(r"approval_id=([0-9a-f-]{36})")
 _TEST_CASE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 ResourceId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{1,63}$")]
 
@@ -401,7 +403,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "task_id": str(delegation.task_id),
             "report_id": run.report_id,
             "trace": [t.as_dict() for t in run.trace],
+            # Approval requests the run raised (the user decides them via /api/v1/approvals).
+            "pending_approvals": sorted({m for t in run.trace for m in _APPROVAL_RE.findall(t.error or "")}),
         }
+
+    # ------------------------------------------------------------------ approvals (delegating human)
+
+    @app.get("/api/v1/approvals")
+    async def list_approvals(caller: CallerDep, request: Request) -> dict[str, Any]:
+        """Approval requests addressed to the caller (only the delegating human ever sees or decides them)."""
+        services = _services(request)
+        items = await list_for_approver(services.pool, approver=caller.principal)
+        return {"request_id": str(caller.meta.request_id), "approvals": [a.as_dict() for a in items]}
+
+    async def _decide(approval_id: str, approve: bool, caller: Caller, request: Request) -> dict[str, Any]:
+        services = _services(request)
+        try:
+            aid = uuid.UUID(approval_id)
+        except ValueError:
+            aid = None
+        view = (
+            await decide(services.pool, approver=caller.principal, approval_id=aid, approve=approve)
+            if aid and caller.principal.type == "human" and caller.principal.active
+            else None
+        )
+        action = "approvals:approve" if approve else "approvals:reject"
+        if view is None:
+            d = await services.enforcer.deny_without_evaluation(
+                caller.meta,
+                subject=caller.principal,
+                action=action,
+                resource_id=None,
+                reason="APPROVAL_NOT_DECIDABLE",
+            )
+            raise _deny(d)
+        await services.enforcer.record_execution(
+            caller.meta,
+            subject=caller.principal,
+            action=action,
+            resource_id=f"approval:{view.id}"[:80],
+            outcome="success",
+            task_id=view.task_id,
+        )
+        return {"request_id": str(caller.meta.request_id), "approval": view.as_dict()}
+
+    @app.post("/api/v1/approvals/{approval_id}/approve")
+    async def approve(approval_id: str, caller: CallerDep, request: Request) -> dict[str, Any]:
+        return await _decide(approval_id, True, caller, request)
+
+    @app.post("/api/v1/approvals/{approval_id}/reject")
+    async def reject(approval_id: str, caller: CallerDep, request: Request) -> dict[str, Any]:
+        return await _decide(approval_id, False, caller, request)
 
     # ------------------------------------------------------------------ audit (security admin)
 

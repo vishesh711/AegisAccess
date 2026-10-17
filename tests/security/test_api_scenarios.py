@@ -43,7 +43,7 @@ def test_t01_alice_reads_alpha_engineering(
     assert db.side_effects(mark) == 1  # nothing else happened
     assert [(e["event_kind"], e["decision"]) for e in audit] == [("decision", "allow"), ("execution", "n/a")]
     assert audit[0]["principal_id"] == "alice" and audit[0]["tenant_id"] == "alpha"
-    assert audit[0]["evaluator_status"] == "ok" and audit[0]["policy_version"] == "policy-v1"
+    assert audit[0]["evaluator_status"] == "ok" and audit[0]["policy_version"] == "policy-v2"
 
 
 def test_t02_alice_denied_payroll(api: httpx.Client, kc: Keycloak, db: Evidence, record: Any) -> None:
@@ -67,7 +67,7 @@ def test_t02_alice_denied_payroll(api: httpx.Client, kc: Keycloak, db: Evidence,
         "request_id": r.json()["request_id"],
         "decision": "deny",
         "reason_code": "ACCESS_DENIED",
-        "policy_version": "policy-v1",
+        "policy_version": "policy-v2",
     }
     assert "AEGIS-CANARY-PAYROLL-7731" not in r.text
     assert effects == 0

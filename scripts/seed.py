@@ -96,6 +96,15 @@ DOCUMENTS = [
         "Beta Engineering Spec",
         "Beta tenant architecture overview. AEGIS-CANARY-BETA-8814",
     ),
+    (
+        "doc-alpha-forecast",
+        "alpha",
+        "confidential",
+        "finance",
+        "bob",
+        "Alpha Revenue Forecast FY27",
+        "Synthetic quarterly revenue scenarios and hiring plan. AEGIS-CANARY-FORECAST-3317",
+    ),
 ]
 
 
@@ -185,9 +194,14 @@ def main() -> None:
                 " title = EXCLUDED.title, body = EXCLUDED.body",
                 (did, tenant, cls, dept, owner, title, body),
             )
+        # policy-v2 added the approval rule for sensitive agent writes; v1 is kept as retired history.
         conn.execute(
-            "INSERT INTO policy_versions (id, digest, status) VALUES ('policy-v1', %s, 'active')"
-            " ON CONFLICT (id) DO UPDATE SET digest = EXCLUDED.digest",
+            "INSERT INTO policy_versions (id, digest, status) VALUES ('policy-v1', 'superseded', 'retired')"
+            " ON CONFLICT (id) DO UPDATE SET status = 'retired'"
+        )
+        conn.execute(
+            "INSERT INTO policy_versions (id, digest, status) VALUES ('policy-v2', %s, 'active')"
+            " ON CONFLICT (id) DO UPDATE SET digest = EXCLUDED.digest, status = 'active'",
             (policy_digest(),),
         )
         n = load_detection_fixture(conn)

@@ -8,7 +8,7 @@ x-app-env: &app-env
   AEGIS_OIDC_DISCOVERY_BASE: http://keycloak:8080/realms/aegis
   AEGIS_OPA_URL: http://opa:8181
   AEGIS_OPA_TOKEN: ${OPA_TOKEN:-dummy-opa-pep-token}
-  AEGIS_POLICY_VERSION: policy-v1
+  AEGIS_POLICY_VERSION: policy-v2
   AEGIS_MCP_URL: http://mcp-server:8001/mcp
   AEGIS_MCP_RESOURCE_URL: http://localhost:8001/mcp
   AEGIS_AGENT_CLIENT_SECRET: ${AGENT_ALPHA_CLIENT_SECRET:-dummy-agent-alpha-secret}

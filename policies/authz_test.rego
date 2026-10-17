@@ -34,7 +34,7 @@ mcp_ctx := {"environment": "local", "request_origin": "mcp"}
 
 api_input(subject, action, resource) := {
 	"subject": subject, "action": action, "resource": resource,
-	"context": api_ctx, "policy_version": "policy-v1",
+	"context": api_ctx, "policy_version": "policy-v2",
 }
 
 deleg(user, ag, actions, rids) := {
@@ -44,7 +44,7 @@ deleg(user, ag, actions, rids) := {
 
 mcp_input(subject, ag, d, action, resource) := {
 	"subject": subject, "agent": ag, "delegation": d, "action": action, "resource": resource,
-	"context": mcp_ctx, "policy_version": "policy-v1",
+	"context": mcp_ctx, "policy_version": "policy-v2",
 }
 
 alice_task := deleg(alice, agent_alpha, ["documents:read", "reports:create"], ["doc-alpha-eng", "doc-alpha-eng-notes"])
@@ -248,4 +248,45 @@ test_allow_iff_no_deny_reasons if {
 		no_reasons := count(r) == 0
 		a == no_reasons
 	}
+}
+
+# ------------------------------------------------------------- approvals for sensitive agent writes
+
+confidential_report := {"id": "report:t-1", "tenant_id": "alpha", "kind": "report", "classification": "confidential", "department": "*"}
+
+bob_report_task := deleg(bob, agent_alpha, ["documents:read", "reports:create"], ["doc-alpha-forecast"])
+
+test_confidential_agent_report_needs_approval if {
+	i := mcp_input(bob, agent_alpha, bob_report_task, "reports:create", confidential_report)
+	not authz.allow with input as i
+	authz.deny_reasons == {"APPROVAL_REQUIRED"} with input as i
+}
+
+test_confidential_agent_report_allowed_with_valid_approval if {
+	i := object.union(mcp_input(bob, agent_alpha, bob_report_task, "reports:create", confidential_report), {"approval": {"valid": true}})
+	authz.allow with input as i
+}
+
+test_invalid_approval_still_denied if {
+	i := object.union(mcp_input(bob, agent_alpha, bob_report_task, "reports:create", confidential_report), {"approval": {"valid": false}})
+	not authz.allow with input as i
+	"APPROVAL_REQUIRED" in authz.deny_reasons with input as i
+}
+
+test_approval_never_expands_grants if {
+	# Alice (engineer) cannot create confidential reports; an approval does not change that.
+	d := deleg(alice, agent_alpha, ["reports:create"], [])
+	i := object.union(mcp_input(alice, agent_alpha, d, "reports:create", confidential_report), {"approval": {"valid": true}})
+	not authz.allow with input as i
+	"SUBJECT_NOT_GRANTED" in authz.deny_reasons with input as i
+}
+
+test_malformed_approval_is_invalid_input if {
+	i := object.union(mcp_input(bob, agent_alpha, bob_report_task, "reports:create", confidential_report), {"approval": {"valid": "true"}})
+	not authz.allow with input as i
+	"INVALID_INPUT" in authz.deny_reasons with input as i
+}
+
+test_internal_agent_report_needs_no_approval if {
+	authz.allow with input as mcp_input(alice, agent_alpha, alice_task, "reports:create", report_alpha)
 }

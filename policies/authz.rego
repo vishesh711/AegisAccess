@@ -25,6 +25,8 @@ agent := object.get(input, "agent", null)
 
 delegation := object.get(input, "delegation", null)
 
+approval := object.get(input, "approval", null)
+
 # ---------------------------------------------------------------- input validation
 
 non_empty_string(x) if {
@@ -69,7 +71,12 @@ origin_shape_ok if {
 	valid_delegation(delegation)
 }
 
+approval_shape_ok if approval == null
+
+approval_shape_ok if is_boolean(approval.valid)
+
 input_valid if {
+	approval_shape_ok
 	input.policy_version == policy_version
 	input.action in known_actions
 	valid_principal(input.subject)
@@ -155,6 +162,18 @@ contextual_deny contains "RESTRICTED_VIA_AGENT" if {
 	origin == "mcp"
 	input.resource.classification == "restricted"
 }
+
+# A sensitive write by an agent (a report built from confidential or restricted sources) also needs a
+# server-stored, single-use approval by the delegating human of these exact arguments. The PEP looks
+# the approval up and passes only its validity; this rule can only deny.
+contextual_deny contains "APPROVAL_REQUIRED" if {
+	origin == "mcp"
+	input.action == "reports:create"
+	input.resource.classification in {"confidential", "restricted"}
+	not approval_valid
+}
+
+approval_valid if approval.valid == true
 
 contextual_deny contains "ENVIRONMENT_NOT_ALLOWED" if {
 	not input.context.environment in {e | some e in data.aegis.allowed_environments}

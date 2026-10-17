@@ -162,8 +162,16 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 - [x] security suite recorder → scenario_results + artifacts/security-test-report.md
 - [x] docs: architecture, STRIDE, design review ADRs, residual risks, sql evaluation
 - [x] clean-start run (`make down && make up migrate seed lint test security-test sql-eval demo`)
-- [ ] CI workflow executed on GitHub (written; not run from this environment — see BLOCKERS.md)
+- [x] CI workflow executed on GitHub (green on `main`; see BLOCKERS.md)
 - [x] artifacts/verification/M4.md
+
+### Post-MVP additions (user request: items 1–6)
+- [x] 6 Hygiene: actions pinned to commit SHAs, Trivy fails on fixable CRITICAL, 1,888-row generated labelled dataset
+- [x] 1 Agent tokens via Keycloak standard token exchange, bound server-side to one task (T13)
+- [x] 2 Human approval for confidential agent writes: server-stored, digest-bound, single-use (T14, ADR-7)
+- [ ] 5 External append-only audit sink + allow/execution reconciliation
+- [ ] 4 Hardened profile: Keycloak TLS + PostgreSQL, auth code + PKCE, mTLS to OPA
+- [ ] 3 Optional real LLM planner behind the same tool boundary (off by default)
 
 ## 7. Test mapping
 
@@ -181,6 +189,8 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 | T10 | unknown tool / exports.simulate → DENY | same | 0 side effects, audited |
 | T11 | OPA down/timeout/500/malformed/undefined → DENY/503 | tests/security/test_fail_closed.py | 0 reads, incident audit |
 | T12 | spoofed tenant/user/role headers, body fields, tool args → ignored/rejected | tests/security/test_spoofing.py | access unchanged, 0 extra reads |
+| T13 | agent token not bound to the task / bound to another task / other agent / other user → DENY | tests/security/test_agent_token_binding.py | 0 tool side effects |
+| T14 | confidential agent write without approval, replayed, tampered, wrong approver, expired, concurrent → DENY (one write only) | tests/security/test_approvals.py | `report_write` rows counted per attempt |
 | + | audit secrecy (no tokens/canaries), audit UPDATE/DELETE denied, SQL metrics exact, MCP schema | tests/security, tests/integration | DB assertions |
 
 ## 8. Commands

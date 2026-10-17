@@ -144,6 +144,7 @@ class Enforcer:
         origin: Origin,
         agent: Principal | None = None,
         delegation: DelegationInput | None = None,
+        approval: bool | None = None,
     ) -> dict[str, Any]:
         policy_input: dict[str, Any] = {
             "subject": subject.to_policy(),
@@ -156,6 +157,9 @@ class Enforcer:
             policy_input["agent"] = agent.to_policy()
         if delegation is not None:
             policy_input["delegation"] = delegation.to_policy()
+        if approval is not None:
+            # Only validity is passed: the approval itself was looked up server-side (approvals.py).
+            policy_input["approval"] = {"valid": approval}
         return policy_input
 
     def _event(
@@ -244,6 +248,7 @@ class Enforcer:
         resource: SupportsPolicy | None,
         agent: Principal | None = None,
         delegation: DelegationInput | None = None,
+        approval: bool | None = None,
     ) -> Decision:
         task_id = delegation.task_id if delegation else None
         if resource is None:
@@ -274,6 +279,7 @@ class Enforcer:
             origin=meta.origin,
             agent=agent,
             delegation=delegation,
+            approval=approval,
         )
         try:
             result = await self._pdp.decide(policy_input)

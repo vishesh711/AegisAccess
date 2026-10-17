@@ -1,8 +1,8 @@
 """Narrated demo against the running compose stack (`make up migrate seed` first).
 
 Shows: an allowed employee read, a denied cross-tenant read, a denied AI exfiltration attempt
-(prompt injection), the audit trail for it (as the MFA-protected security admin), side-effect
-evidence from PostgreSQL, and the detection metrics. Tokens are never printed.
+(prompt injection), a sensitive agent write held for human approval, the audit trail (as the
+MFA-protected security admin), side-effect evidence from PostgreSQL, and the detection metrics. Tokens are never printed.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ OWNER_DSN = os.environ.get(
     "AEGIS_OWNER_DATABASE_URL", "postgresql://aegis_owner:dummy-aegis-owner-pw@127.0.0.1:5432/aegis"
 )
 # Synthetic demo credentials (also in infra/keycloak/aegis-realm.json). Not secrets.
-PW = {"alice": "alice-demo-pw", "secadmin": "secadmin-demo-pw"}
+PW = {"alice": "alice-demo-pw", "bob": "bob-demo-pw", "secadmin": "secadmin-demo-pw"}
 OTP_KEY = b"aegis-demo-otp-secret-dummy01"
 
 
@@ -118,6 +118,32 @@ def main() -> int:
     print(f"observed side effects: {effects_since(conn, m)}")
     print("-> the planner OBEYED the injected text; the MCP tool boundary denied payroll + export.")
 
+    h("3b. Bob delegates a CONFIDENTIAL forecast summary: the report write waits for his approval")
+    bob = {"Authorization": f"Bearer {login('bob')}"}
+    bob_task = httpx.post(
+        f"{API}/api/v1/tasks",
+        headers=bob,
+        json={
+            "agent_id": "agent-alpha",
+            "actions": ["documents:read", "reports:create"],
+            "resource_ids": ["doc-alpha-forecast"],
+            "ttl_seconds": 300,
+        },
+    ).json()["task_id"]
+    bob_consent = {"Authorization": f"Bearer {login('bob', scope='delegate-agent-alpha')}"}
+    m = mark(conn)
+    first = httpx.post(f"{API}/api/v1/tasks/{bob_task}/invoke", headers=bob_consent, timeout=60).json()
+    print(f"first run: report_id={first['report_id']} pending_approvals={first['pending_approvals']}")
+    print(f"observed side effects: {effects_since(conn, m)}  (read only, no report_write)")
+    for approval_id in first["pending_approvals"]:
+        r = httpx.post(f"{API}/api/v1/approvals/{approval_id}/approve", headers=bob)
+        print(f"Bob approves {approval_id}: HTTP {r.status_code} status={r.json()['approval']['status']}")
+    m = mark(conn)
+    second = httpx.post(f"{API}/api/v1/tasks/{bob_task}/invoke", headers=bob_consent, timeout=60).json()
+    print(f"second run: report_id={second['report_id']} pending_approvals={second['pending_approvals']}")
+    print(f"observed side effects: {effects_since(conn, m)}")
+    print("-> the approval covered exactly those arguments and was used up by that one write.")
+
     h("4. Security admin (password + TOTP MFA) inspects the audit trail for that agent run")
     sec = {"Authorization": f"Bearer {login('secadmin')}"}
     r = httpx.get(
@@ -129,10 +155,12 @@ def main() -> int:
             f"{e['reason_code']}"
         )
 
-    h("5. Detection metrics on the labelled synthetic fixture (make sql-eval for details)")
+    h("5. Detection metrics on the labelled synthetic datasets (make sql-eval for details)")
     for row in conn.execute(open("analytics/queries/confusion_matrix.sql").read()):  # noqa: SIM115
+        dataset, detector, tp, fp, fn, tn, precision, recall = row[:8]
         print(
-            f"  {row[0]:18} TP={row[1]} FP={row[2]} FN={row[3]} TN={row[4]} precision={row[5]} recall={row[6]}"
+            f"  {dataset:8} {detector:18} TP={tp} FP={fp} FN={fn} TN={tn}"
+            f" precision={precision} recall={recall}"
         )
     conn.close()
     return 0
