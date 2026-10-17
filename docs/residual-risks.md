@@ -24,7 +24,9 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 7. **In-memory rate limiter** is per-process and resets on restart.
 8. **Side channels** (timing of cross-tenant vs nonexistent ids, search timing) not evaluated.
 9. **Model output integrity**: an agent can still produce a misleading summary from in-scope content;
-   only *access* is controlled.
+   only *access* is controlled. This applies equally to the optional real-model planner (ADR-10).
+   When it is enabled, the content of *allowed* documents is sent to the Anthropic API; it is off by
+   default and has not been run against the real API here.
 10. **Detection metrics** come from synthetic data: a 33-row hand-labelled fixture and a 1,888-row generated
     day (`scripts/gen_detection_dataset.py`). They say nothing about real-world performance. The larger set
     shows rule R2 misfiring on benign agent search filtering (30 false alarms): the rule needs to exclude

@@ -26,7 +26,7 @@ from aegis.delegation import AGENT_DELEGABLE_ACTIONS, create_task, load_delegati
 from aegis.identity import IdentityError, Principal, load_principal, resolve_principal
 from aegis.logging import configure_logging, install_redaction_on_all_handlers
 from aegis.pep import Decision, PolicyResource, RequestMeta
-from aegis.planner import DeterministicPlanner
+from aegis.planner import DeterministicPlanner, Planner
 from aegis.resources import get_metadata, valid_resource_id
 from aegis.services import Services, open_services
 
@@ -58,6 +58,20 @@ class Caller:
 def _services(request: Request) -> Services:
     services: Services = request.app.state.services
     return services
+
+
+def services_planner(request: Request) -> Planner:
+    planner: Planner = request.app.state.planner
+    return planner
+
+
+def build_planner(settings: Settings) -> Planner:
+    """Chosen once at startup; a misconfigured LLM planner fails the boot, not a request."""
+    if settings.agent_planner == "anthropic":
+        from aegis.llm_planner import LlmPlanner, make_anthropic_client
+
+        return LlmPlanner(make_anthropic_client(), model=settings.llm_model, effort=settings.llm_effort)
+    return DeterministicPlanner()
 
 
 def _decision_body(d: Decision) -> dict[str, Any]:
@@ -143,7 +157,8 @@ class SimulateRequest(BaseModel):
 # ----------------------------------------------------------------------------- app
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, planner: Planner | None = None) -> FastAPI:
+    """``planner`` overrides the configured one (tests inject a scripted model behind the real boundary)."""
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -151,6 +166,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         install_redaction_on_all_handlers()
         async with open_services(settings) as services:
             app.state.services = services
+            app.state.planner = planner or build_planner(settings)
             yield
 
     app = FastAPI(title="AegisAccess API", version="0.1.0", lifespan=lifespan)
@@ -388,7 +404,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task_id=tid,
             )
             raise _deny(d) from exc
-        planner = DeterministicPlanner()
+        planner = services_planner(request)
         async with McpToolClient(
             url=settings.mcp_url,
             access_token=agent_token,
@@ -403,6 +419,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "correlation_id": str(caller.meta.correlation_id),
             "task_id": str(delegation.task_id),
             "report_id": run.report_id,
+            "planner": settings.agent_planner,
+            "stopped": run.stopped,
             "trace": [t.as_dict() for t in run.trace],
             # Approval requests the run raised (the user decides them via /api/v1/approvals).
             "pending_approvals": sorted({m for t in run.trace for m in _APPROVAL_RE.findall(t.error or "")}),

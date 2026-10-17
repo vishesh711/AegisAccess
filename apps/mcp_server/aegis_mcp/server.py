@@ -205,7 +205,9 @@ class ToolCallGuard:
 
         services = self._holder.get()
         safe_name = name if isinstance(name, str) else "invalid"
-        headers = getattr(ctx, "headers", None)
+        # The middleware context has no `headers`; they live on the transport's HTTP request. Used only for
+        # the (UUID-validated) correlation id, so pre-dispatch refusals join the agent run's audit trail.
+        headers = getattr(ctx.request, "headers", None)
         try:
             caller = await _resolve_caller(services, safe_name, headers)
             await services.gateway.reject_call(caller, safe_name, reason)

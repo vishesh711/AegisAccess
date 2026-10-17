@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     agent_client_id: str = "agent-alpha"
     agent_client_secret: SecretStr = SecretStr("dummy-agent-alpha-secret")  # pragma: allowlist secret
 
+    # Agent planner. "deterministic" (default) is the obedient fake used by every test. "anthropic" asks a
+    # Claude model to plan (ADR-10); it needs the `llm` extra and Anthropic credentials in the SDK's own
+    # environment variables. Either way, every tool call goes through the same MCP tool boundary.
+    agent_planner: Literal["deterministic", "anthropic"] = "deterministic"
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+
     # Limits.
     max_task_ttl_seconds: int = 3600
     max_summary_chars: int = 2000

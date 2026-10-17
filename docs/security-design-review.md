@@ -238,3 +238,48 @@ Keycloak health check is a TCP probe (the image has no TLS client). The full att
 default profile; the hardened suite covers transport and login, plus representative allow, deny and
 agent paths.
 
+## ADR-10: Optional real-model planner
+
+**Context.** Every test uses a deterministic planner that obeys injected instructions on purpose. That
+proves the tool boundary holds against a worst-case agent, but not that a real model is wired the same
+way.
+
+**Decision.**
+- `src/aegis/llm_planner.py` implements the same `run(task_id, resource_ids, client)` interface with a
+  manual tool loop on the official Anthropic Python SDK (`anthropic==1.15.0`, the `llm` extra):
+  - model `claude-opus-5-5`, effort `medium`, adaptive thinking (the model default), `tool_choice: auto`;
+  - three strict tool schemas mirroring the MCP tools (API names can't contain dots: `documents_read` is
+    sent as `documents.read`);
+  - server-side refusal fallback (`fallbacks: "default"`), step and turn budgets.
+- The model only proposes calls. Every proposal, including tools that don't exist, goes unchanged through
+  the agent's task-bound token to the MCP server. There, the normal checks apply: authentication,
+  user ∩ agent ∩ task, approval, audit. The planner filters and decides nothing, and its system prompt
+  is not a control.
+- It is selected only by `AEGIS_AGENT_PLANNER=anthropic`, at startup (a missing SDK fails the boot).
+  The default stays `deterministic`. Credentials come from the SDK's own environment resolution; the
+  planner never reads, stores or logs them.
+- What leaves the process: task id, document ids, tool schemas, and the content of documents the
+  boundary allowed (synthetic data only). Never tokens, identities, or denied content (asserted in T16).
+- Tool results longer than 8,000 characters are cut, and the cut is marked in the text.
+
+**Found while building it.** Calls refused before dispatch (unknown tool, bad arguments, oversized
+payload) were audited under a fresh correlation id. The guard read headers from a context object that
+has none, so these refusals did not show up in the agent run's trail. Fixed: the guard now reads them
+from the transport's HTTP request. T16 asserts the `UNKNOWN_TOOL` refusal is in the run's trail.
+
+**Evidence.**
+- `tests/unit/test_llm_planner.py` (5 tests): forwarding without filtering, request shape, strict-schema
+  keywords, budgets and refusal.
+- `tests/security/test_llm_planner_boundary.py` (T16, 2 tests): a scripted, prompt-injected model goes
+  through the real API, token exchange, MCP, OPA and PostgreSQL:
+  - payroll, export, shell and cross-tenant calls are all denied;
+  - exactly 3 side effects: two allowed reads and one report;
+  - four correlated denials;
+  - no payroll or beta canary and no token in anything the model was sent;
+  - a confidential report still waits for the human approval.
+
+**Not verified.** No request was sent to the real Anthropic API from this environment: that needs a key
+and the user's approval to send (synthetic) data to an external service. The tests prove the wiring and
+the boundary, not a real model's behaviour. Output integrity (a misleading summary of allowed content)
+is unchanged: residual risk #9.
+

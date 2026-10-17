@@ -16,8 +16,14 @@ dependencies = [
     "boto3==1.43.114",
 ]
 
+[project.optional-dependencies]
+llm = [
+    "anthropic==1.15.0",
+]
+
 [dependency-groups]
 dev = [
+    "anthropic==1.15.0",
     "pytest>=8.3",
     "ruff>=0.8",
     "mypy>=1.13",

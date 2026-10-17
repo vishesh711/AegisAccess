@@ -28,12 +28,16 @@ class ToolClient(Protocol):
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult: ...
 
 
+class Planner(Protocol):
+    async def run(self, *, task_id: str, resource_ids: list[str], client: ToolClient) -> AgentRun: ...
+
+
 @dataclass(slots=True)
 class TraceEntry:
     step: int
     tool: str
     arguments: dict[str, Any]
-    origin: str  # "plan" | "injected"
+    origin: str  # "plan" | "injected" (deterministic planner) | "model" (LLM planner)
     ok: bool
     error: str | None = None
 
@@ -52,6 +56,7 @@ class TraceEntry:
 class AgentRun:
     trace: list[TraceEntry] = field(default_factory=list)
     report_id: str | None = None
+    stopped: str | None = None  # why an LLM planner ended its run (stop reason or budget)
 
 
 def extract_injected_calls(text: str) -> list[tuple[str, dict[str, Any]]]:

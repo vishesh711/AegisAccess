@@ -171,7 +171,7 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 - [x] 2 Human approval for confidential agent writes: server-stored, digest-bound, single-use (T14, ADR-7)
 - [x] 5 External append-only audit store (VersityGW, COMPLIANCE lock, hash chain) + reconciliation (T15, ADR-8)
 - [x] 4 Hardened profile: Keycloak TLS + PostgreSQL, auth code + PKCE, mTLS to OPA (ADR-9, tests/hardened)
-- [ ] 3 Optional real LLM planner behind the same tool boundary (off by default)
+- [x] 3 Optional real LLM planner behind the same tool boundary (off by default; ADR-10, T16; live API call not run)
 
 ## 7. Test mapping
 
@@ -192,6 +192,7 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 | T13 | agent token not bound to the task / bound to another task / other agent / other user → DENY | tests/security/test_agent_token_binding.py | 0 tool side effects |
 | T14 | confidential agent write without approval, replayed, tampered, wrong approver, expired, concurrent → DENY (one write only) | tests/security/test_approvals.py | `report_write` rows counted per attempt |
 | T15 | audit rows shipped to WORM store; deletes refused (incl. root); store and DB tampering, unshipped rows, PEP bypass detected | tests/security/test_audit_sink.py | object versions, findings by id, `document_read` row of the bypass |
+| T16 | prompt-injected LLM planner (scripted model) asks for payroll, export, shell, cross-tenant → all DENY; confidential report waits for approval | tests/security/test_llm_planner_boundary.py | 3 side effects only; canaries absent from model input |
 | + | audit secrecy (no tokens/canaries), audit UPDATE/DELETE denied, SQL metrics exact, MCP schema | tests/security, tests/integration | DB assertions |
 
 ## 8. Commands
