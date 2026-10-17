@@ -88,7 +88,7 @@ def _require_stack(request: pytest.FixtureRequest) -> None:
         return
     missing = [
         n
-        for n, p in (("keycloak", 8080), ("postgres", 5432), ("opa", 8181))
+        for n, p in (("keycloak", 8080), ("postgres", 5432), ("opa", 8181), ("audit-sink", 7070))
         if not _reachable("127.0.0.1", p)
     ]
     if missing:

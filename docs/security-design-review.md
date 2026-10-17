@@ -59,8 +59,7 @@ tampering, out of scope for a local demo. Async queue — better availability, b
 "no side effect without a durable decision record".
 
 **Consequences.** Audit availability is coupled to DB availability (acceptable: data is in the same
-DB). A DB superuser can disable triggers; production should stream to an external immutable store and
-alert on gaps (missing execution events for allow decisions are detectable by correlation id).
+DB). A DB superuser can disable triggers; ADR-8 adds the external immutable copy and the gap checks.
 
 ## ADR-4: MCP transport (streamable HTTP, stateless, bearer per request)
 
@@ -127,3 +126,61 @@ atomic with the write, which only the database can do).
 approver, rejected and expired, five concurrent uses -> one write, full agent run, `approved` argument),
 approval tests in `policies/authz_test.rego`. Mutation checks: removing consumption, consuming outside the write
 transaction, or ignoring the digest each make T14 fail.
+
+## ADR-8: External append-only audit store and reconciliation
+
+**Context.** ADR-3 keeps audit rows in PostgreSQL, where the table owner or a superuser can disable the
+immutability trigger and rewrite history. A check that "every allowed action was executed and every
+execution was allowed" was also missing.
+
+**Decision.**
+- A local S3-compatible store (VersityGW 1.8.0, POSIX backend, versioning + object lock) runs in compose.
+  MinIO images are no longer published on Docker Hub, so VersityGW was chosen; it was tested here before
+  use (results below).
+- `audit-shipper` (its own DB role: SELECT on `audit_events`, INSERT on `audit_shipments`; its own S3 user)
+  ships unshipped rows every 3 s as `batches/<seq>.jsonl`:
+  - a header with the previous batch's sha256 (hash chain), then one line per event with its digest;
+  - each object written with `If-None-Match: *` and an explicit per-object COMPLIANCE retention (7 days).
+  "Unshipped" means "no `audit_shipments` row", not "after the last id", so rows that commit late are
+  never skipped.
+- The bucket policy gives the shipper only put/get/list and the auditor only get/list/versions/retention.
+  Nobody has delete, policy, lock or versioning rights; COMPLIANCE retention blocks deletion even for root.
+- `make audit-verify` (DB role `aegis_auditor`, read-only S3 user) reports:
+  - store integrity: delete markers, extra versions, gaps, broken chain, edited events, weak retention;
+  - store vs database: rows deleted or modified after shipping, rows not shipped within 120 s, shipment
+    records with no stored copy;
+  - activity: executions of policy-governed actions without an allow decision in the same request,
+    executions of unknown actions, side effects without an execution event (now matched by
+    `request_id`, migration 0007), and a warning for allowed MCP calls that never executed.
+
+**Measured VersityGW behaviour (v1.8.0, this environment).** With explicit COMPLIANCE retention:
+- deleting a version is refused, including with the governance bypass header;
+- shortening the retention is refused, as is suspending versioning;
+- a second write with `If-None-Match` is refused, and an overwrite without it adds a version while keeping
+  the original;
+- root can still add a delete marker (standard S3 semantics): the locked version stays readable, and the
+  verifier reports `SINK_DELETE_MARKER`.
+
+With only the bucket's *default* retention, the retention could be shortened and the version then
+deleted. That is why the shipper sets retention per object and the verifier checks it on every object
+via `GetObjectRetention` (GET does not return the lock headers on this server).
+
+**Alternatives rejected.** A second PostgreSQL database (same administrators, no WORM property); a local
+append-only file (deletable by anyone with the volume); syslog/SIEM (out of scope for a local demo).
+
+**Consequences.** Events are copied within seconds, not synchronously: an attacker with owner rights who
+acts within the shipping interval can alter a row before its first copy (residual risk #3). Anyone with
+access to the storage volume or host bypasses the S3 API entirely; the hash chain and the database copy
+make that visible, but cannot prevent it. Production should use a managed store with compliance-mode
+object lock (for example S3 Object Lock) in a separate account.
+
+**Evidence.**
+- `tests/security/test_audit_sink.py` (T15): shipping; nine destructive calls refused, including as root;
+  six kinds of store tampering detected; owner-level DB tampering detected; fake shipment records and
+  unshipped rows detected; reconciliation flags an adapter call that skipped the PEP, a forged execution
+  and an unknown action, with zero findings for normal traffic.
+- `tests/unit/test_audit_sink.py`.
+- Mutation checks: disabling any one of eight verifier or shipper controls makes T15 fail.
+- On a full test run, the activity checks reported only the deliberate cases above, plus the existing
+  test that calls the adapter directly, plus four warnings from the T14 concurrency test (allowed, then
+  denied because another request had already used the approval).

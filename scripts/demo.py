@@ -2,7 +2,8 @@
 
 Shows: an allowed employee read, a denied cross-tenant read, a denied AI exfiltration attempt
 (prompt injection), a sensitive agent write held for human approval, the audit trail (as the
-MFA-protected security admin), side-effect evidence from PostgreSQL, and the detection metrics. Tokens are never printed.
+MFA-protected security admin), side-effect evidence from PostgreSQL, the detection metrics, and
+the audit trail verified against the external append-only store. Tokens are never printed.
 """
 
 from __future__ import annotations
@@ -14,9 +15,14 @@ import os
 import struct
 import sys
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import psycopg
+
+from aegis.audit_reconcile import run_all
+from aegis.audit_sink import Shipper, SinkSettings, s3_client
 
 API = os.environ.get("AEGIS_DEMO_API", "http://127.0.0.1:8000")
 TOKEN_URL = "http://localhost:8080/realms/aegis/protocol/openid-connect/token"
@@ -69,7 +75,39 @@ def mark(conn: psycopg.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+SHIPPER_DSN = "postgresql://aegis_audit_shipper:dummy-aegis-shipper-pw@127.0.0.1:5432/aegis"  # DUMMY
+AUDITOR_DSN = "postgresql://aegis_auditor:dummy-aegis-auditor-pw@127.0.0.1:5432/aegis"  # DUMMY
+SINK = "http://127.0.0.1:7070"
+
+
+def audit_store_check(started: datetime) -> None:
+    shipper_cfg = SinkSettings(SINK, "aegis-shipper", "dummy-sink-shipper-secret")
+    Shipper(SHIPPER_DSN, s3_client(shipper_cfg), shipper_cfg).ship_all()
+    auditor_cfg = SinkSettings(SINK, "aegis-auditor", "dummy-sink-auditor-secret")
+    with psycopg.connect(AUDITOR_DSN) as conn:
+        report = run_all(
+            conn,
+            s3_client(auditor_cfg),
+            auditor_cfg.bucket,
+            retention_days=auditor_cfg.retention_days,
+            activity_since=started,
+            settle_seconds=0,
+        )
+    print(
+        f"external store: {report.batches} hash-chained batches, {report.events_in_sink} events, "
+        f"each under COMPLIANCE retention (database holds {report.events_in_db})"
+    )
+    print(
+        f"critical findings: {len(report.critical)}  warnings: {len(report.findings) - len(report.critical)}"
+    )
+    for f in report.findings[:10]:
+        print(f"  {f.severity} {f.code} {f.ref} {f.detail}")
+
+
 def main() -> int:
+    started = datetime.now(UTC)
+    Path("artifacts/tmp").mkdir(parents=True, exist_ok=True)
+    Path("artifacts/tmp/demo-started-at").write_text(started.isoformat())
     conn = psycopg.connect(OWNER_DSN, autocommit=True)
     alice = {"Authorization": f"Bearer {login('alice')}"}
 
@@ -163,6 +201,9 @@ def main() -> int:
             f" precision={precision} recall={recall}"
         )
     conn.close()
+
+    h("6. Audit trail shipped to the external WORM store and reconciled with the database")
+    audit_store_check(started)
     return 0
 
 

@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv sync --frozen
-      - name: Start stack (keycloak, postgres, opa, api, mcp-server)
+      - name: Start stack (keycloak, postgres, opa, api, mcp-server, audit-sink, audit-shipper)
         run: make up
       - run: make migrate seed
       - name: Unit + integration + security tests against real Keycloak/OPA/PostgreSQL
@@ -40,7 +40,10 @@ jobs:
       - name: Attack corpus with side-effect checks + report (fails on any unauthorized side effect)
         run: make security-test
       - run: make sql-eval
-      - run: make demo
+      - name: Demo (its last step ships and verifies the audit trail of the demo run)
+        run: make demo
+      - name: External audit store + reconciliation (whole store vs DB; activity since the demo began)
+        run: make audit-ship audit-verify SINCE="$(cat artifacts/tmp/demo-started-at)"
       - name: Container image scan - fail on fixable CRITICAL
         run: >
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
@@ -60,6 +63,7 @@ jobs:
             artifacts/security-test-report.md
             artifacts/verification/sql-eval.md
             artifacts/tmp/scenarios.json
+            artifacts/tmp/audit-verify.json
       - name: Compose logs on failure
         if: failure()
         run: make logs

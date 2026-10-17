@@ -1,10 +1,10 @@
 # AegisAccess security test report
 
-* Generated: 2026-10-17T00:26:11+00:00
-* Git revision: `2d918c0` (working tree has uncommitted changes)
-* Run id (scenario_results.run_id): `f11d508a-3c99-4333-adb0-652a84ad9093`
+* Generated: 2026-10-17T00:49:02+00:00
+* Git revision: `a9cb0e2` (working tree has uncommitted changes)
+* Run id (scenario_results.run_id): `6bd63abb-8fe5-439c-8060-f662ad16aeb4`
 * pytest exit status for `tests/security`: **0** (0 = all tests passed)
-* Scenarios recorded: 33; outcome mismatches: 0; mandatory T01-T12 missing: none
+* Scenarios recorded: 38; outcome mismatches: 0; mandatory T01-T12 missing: none
 
 Side-effect counts are **observed** rows in `resource_side_effects` (written by the resource adapter in
 the same transaction as the protected operation), read back from PostgreSQL after each request — not
@@ -13,8 +13,8 @@ inferred from HTTP status codes. Audit counts are rows in the append-only `audit
 | Scenario | Description | Request | Expected | Actual | Side effects (exp/obs) | Audit rows | Result |
 |---|---|---|---|---|---|---|---|
 | AUDIT-IMMUTABLE | Runtime DB role attempts UPDATE/DELETE/TRUNCATE on audit | `aegis_app: UPDATE/DELETE/TRUNCATE audit_events` | deny | deny | 0/0 | 0 | PASS |
-| AUDIT-SECRECY | Scan of 1979 audit rows for tokens/secrets/canaries | `SELECT * FROM audit_events` | clean | clean | 0/0 | 1979 | PASS |
-| LOG-SECRECY | Scan of 9611 raw log records | `captured application/library logs` | clean | clean | 0/0 | 0 | PASS |
+| AUDIT-SECRECY | Scan of 654 audit rows for tokens/secrets/canaries | `SELECT * FROM audit_events` | clean | clean | 0/0 | 654 | PASS |
+| LOG-SECRECY | Scan of 24436 raw log records | `captured application/library logs` | clean | clean | 0/0 | 0 | PASS |
 | T01 | Alice reads alpha engineering document | `GET /api/v1/resources/doc-alpha-eng (alice token)` | allow | allow | 1/1 | 2 | PASS |
 | T02 | Alice (engineer) reads restricted payroll | `GET /api/v1/resources/doc-alpha-payroll (alice token)` | deny | deny | 0/0 | 1 | PASS |
 | T03 | Alice guesses beta tenant document id (IDOR) | `GET /api/v1/resources/doc-beta-eng (alice token)` | deny | deny | 0/0 | 1 | PASS |
@@ -44,12 +44,17 @@ inferred from HTTP status codes. Audit counts are rows in the append-only `audit
 | T13-secret | Stolen agent secret: client credentials, exchange of a non-consent user token, exchange of another agent's consent token | `Keycloak token endpoint x3` | refused | refused | 0/0 | 0 | PASS |
 | T14-replay | Approved sensitive write executes once; identical replay is denied | `reports.create_summary(confidential) x2 after one approval` | allow,deny | allow,deny | 1/1 | 0 | PASS |
 | T14-tamper | Approval for one summary text used with different text | `reports.create_summary with modified summary_text` | deny | deny | 0/0 | 0 | PASS |
+| T15-db-tamper | Owner disables the audit trigger, rewrites a denial as allow and deletes an execution row | `UPDATE + DELETE on shipped audit_events as table owner` | deny | deny | 0/0 | 2 | PASS |
+| T15-reconcile | Adapter call without PEP, execution without allow, unknown action; plus one normal read | `direct DocumentStore.read(payroll) + 2 forged execution events + GET doc-alpha-eng` | deny | deny | 1/1 | 2 | PASS |
+| T15-ship | Allowed read: decision + execution events land in the WORM store and match the DB | `GET doc-alpha-eng (alice), then ship + verify` | allow | allow | 0/0 | 2 | PASS |
+| T15-sink-tamper | Overwrite, gap, broken chain, edited event, unlocked object, delete marker in the store | `6 tampered batch sequences + 1 clean, verified with the read-only auditor` | deny | deny | 0/0 | 0 | PASS |
+| T15-worm | Delete / shorten-retention / unversion attempts on a shipped audit batch (incl. root) | `9 destructive S3 calls on batches/000000000001.jsonl` | deny | deny | 0/0 | 0 | PASS |
 | X-INACTIVE | Deactivated employee with valid IdP session | `GET doc-alpha-eng (dave token)` | deny | deny | 0/0 | 1 | PASS |
 
 ## Policy decision latency (measured, not a guarantee)
 
-From `audit_events.duration_ms` of successful OPA evaluations accumulated in this database (n=1218).
-p50 = 4.33 ms, p95 = 8.55 ms, max = 19.34 ms.
+From `audit_events.duration_ms` of successful OPA evaluations accumulated in this database (n=397).
+p50 = 3.76 ms, p95 = 7.17 ms, max = 16.56 ms.
 Environment: Linux-6.18.44-fc-v139-x86_64-with-glibc2.39, Python 3.12.3, OPA in Docker on the same host,
 PEP->OPA over the local Docker bridge/loopback. Includes HTTP round trip; excludes JWT validation and DB.
 The PRD target (p95 < 100 ms) is aspirational for local runs; this sample is not a load test.

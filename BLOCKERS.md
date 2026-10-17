@@ -12,4 +12,5 @@ here is claimed as working.
 | Docker daemon | Environment-specific | The sandbox had no running daemon; it was started manually with `dockerd`. |
 | Real LLM adapter | Not implemented (optional in spec) | Only the deterministic planner exists; no paid LLM was used. |
 | Approval workflow / approval replay scenario (P1) | **Implemented and tested** | Confidential agent report writes need a server-stored, single-use approval from the delegating user, bound to an argument digest (ADR-7). Covered by T14 in `tests/security/test_approvals.py`. |
+| External audit store | **Implemented and tested** with VersityGW 1.8.0 (Docker Hub, digest-pinned) | MinIO images are no longer on Docker Hub (`pull access denied`), Bitnami's is gone, and `cgr.dev` is blocked here. VersityGW's object-lock behaviour was measured before use (ADR-8); its bucket default retention can be shortened, so per-object retention is used and verified. |
 | `POST /api/v1/scenarios/{id}/run` | Not implemented by design | See ADR-5; replaced by `make security-test`. |

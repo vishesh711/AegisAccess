@@ -12,6 +12,7 @@ workloads and AI agents. It is a portfolio/education project, not a production p
 | MCP server / PEP | official MCP Python SDK 2.3.0, streamable HTTP, stateless | per-request bearer auth, pre-dispatch guard, tool gateway | `apps/mcp_server/aegis_mcp/server.py` |
 | PDP | OPA 1.4.2, Rego v1 | default-deny decisions; user ∩ agent ∩ task; deny-only context rules | `policies/` |
 | Data + audit | PostgreSQL 16.4 | identities/roles/delegations, RLS-protected documents, append-only audit, side-effect log | `migrations/` |
+| External audit store | VersityGW 1.8.0 (S3 API, versioning, COMPLIANCE object lock) + `audit-shipper` | append-only, hash-chained copy of every audit event; read-only verifier reconciles it with the DB (ADR-8) | `src/aegis/audit_sink.py`, `src/aegis/audit_reconcile.py` |
 | Shared library | `src/aegis` | authn, identity, pdp client, pep, audit, resources adapter, delegation, tools, planner | `src/aegis/` |
 
 All container images are pinned by digest; Python dependencies (including transitive) are pinned with
@@ -78,6 +79,18 @@ the model refusing; it depends on the tool boundary.
 4. PostgreSQL RLS on `resources`, `tasks`, `delegations`, `reports` for the runtime role; with no tenant
    set, zero rows are visible.
 5. Runtime DB role: no DDL, no UPDATE/DELETE/TRUNCATE on audit, insert-only on side-effect log.
+
+## Audit copy outside the database (ADR-8)
+
+```
+ audit_events ──(aegis_audit_shipper: SELECT)──► audit-shipper ──(put-only S3 user)──► audit-sink
+      ▲                                                                                 │ batches/<seq>.jsonl
+      │                                                                                 │ hash chain + COMPLIANCE lock
+  make audit-verify (aegis_auditor + read-only S3 user): store integrity, store vs DB, allow/execution
+```
+
+Each side-effect row carries the `request_id` of the call that caused it, so the verifier can match it
+to that request's execution event, and each execution to an allow decision.
 
 ## Health
 

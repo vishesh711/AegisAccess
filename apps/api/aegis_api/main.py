@@ -213,6 +213,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             resource_id=res.id,
             principal_id=caller.principal.id,
             correlation_id=caller.meta.correlation_id,
+            request_id=caller.meta.request_id,
         )
         await services.enforcer.record_execution(
             caller.meta,

@@ -239,6 +239,7 @@ class ToolGateway:
             agent_id=ctx.caller.agent.id,
             task_id=ctx.delegation.task_id,
             correlation_id=ctx.meta.correlation_id,
+            request_id=ctx.meta.request_id,
         )
         await self._executed(ctx, action, meta_res.id, "success" if doc else "not_found")
         if doc is None:
@@ -281,6 +282,7 @@ class ToolGateway:
             agent_id=ctx.caller.agent.id,
             task_id=ctx.delegation.task_id,
             correlation_id=ctx.meta.correlation_id,
+            request_id=ctx.meta.request_id,
         )
         await self._executed(ctx, action, None, "success")
         return SearchOut(items=items)
@@ -367,6 +369,7 @@ class ToolGateway:
                 source_document_ids=document_ids,
                 summary_text=clean,
                 correlation_id=ctx.meta.correlation_id,
+                request_id=ctx.meta.request_id,
                 consume_approval=(approval_id, digest) if approval_id else None,
             )
         except ApprovalNotUsableError:
@@ -400,6 +403,7 @@ class ToolGateway:
             agent_id=ctx.caller.agent.id,
             task_id=ctx.delegation.task_id,
             correlation_id=ctx.meta.correlation_id,
+            request_id=ctx.meta.request_id,
         )
         await self._executed(ctx, action, res.id, "success")
         return ExportOut(status="simulated")

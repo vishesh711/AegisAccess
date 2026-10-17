@@ -5,7 +5,7 @@ OPA_IMAGE := openpolicyagent/opa:1.4.2-static@sha256:3c995dc8a59f6ddfd92eb7404d2
 UV := uv run
 # Optional: AEGIS_EXTRA_CA=/path/ca.pem  (TLS-intercepting proxy during image build only)
 
-.PHONY: help install up down migrate seed lint test unit policy-test integration security-test sql-eval demo logs reset audit-deps
+.PHONY: help install up down migrate seed lint test unit policy-test integration security-test sql-eval demo logs reset audit-deps audit-ship audit-verify
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | sort | tr '\n' ' '; echo
@@ -31,6 +31,17 @@ migrate:
 
 seed:
 	$(UV) python scripts/seed.py
+	$(UV) python scripts/audit_sink_setup.py
+
+# Ship pending audit events now (the compose audit-shipper service also does this every few seconds).
+audit-ship:
+	AEGIS_AUDIT_SHIPPER_DATABASE_URL=$${AEGIS_AUDIT_SHIPPER_DATABASE_URL:-postgresql://aegis_audit_shipper:dummy-aegis-shipper-pw@127.0.0.1:5432/aegis} \
+	  $(UV) python -m aegis.audit_sink --once
+
+# Verify the external audit store and reconcile it with the database. SINCE limits the activity checks.
+audit-verify:
+	@mkdir -p artifacts/tmp
+	$(UV) python scripts/audit_verify.py --activity-since $${SINCE:-24h} --json artifacts/tmp/audit-verify.json
 
 reset: down up migrate seed
 

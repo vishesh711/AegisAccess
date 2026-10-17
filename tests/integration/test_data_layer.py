@@ -102,10 +102,18 @@ def test_adapter_refuses_cross_tenant_read_even_if_called_directly() -> None:
             store = DocumentStore(pool)
             corr = uuid.uuid4()
             cross = await store.read(
-                tenant_id="alpha", resource_id="doc-beta-eng", principal_id="alice", correlation_id=corr
+                tenant_id="alpha",
+                resource_id="doc-beta-eng",
+                principal_id="alice",
+                correlation_id=corr,
+                request_id=uuid.uuid4(),
             )
             own = await store.read(
-                tenant_id="beta", resource_id="doc-beta-eng", principal_id="carol", correlation_id=corr
+                tenant_id="beta",
+                resource_id="doc-beta-eng",
+                principal_id="carol",
+                correlation_id=corr,
+                request_id=uuid.uuid4(),
             )
             return cross, own
         finally:

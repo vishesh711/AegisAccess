@@ -169,7 +169,7 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 - [x] 6 Hygiene: actions pinned to commit SHAs, Trivy fails on fixable CRITICAL, 1,888-row generated labelled dataset
 - [x] 1 Agent tokens via Keycloak standard token exchange, bound server-side to one task (T13)
 - [x] 2 Human approval for confidential agent writes: server-stored, digest-bound, single-use (T14, ADR-7)
-- [ ] 5 External append-only audit sink + allow/execution reconciliation
+- [x] 5 External append-only audit store (VersityGW, COMPLIANCE lock, hash chain) + reconciliation (T15, ADR-8)
 - [ ] 4 Hardened profile: Keycloak TLS + PostgreSQL, auth code + PKCE, mTLS to OPA
 - [ ] 3 Optional real LLM planner behind the same tool boundary (off by default)
 
@@ -191,6 +191,7 @@ argument keys and oversized payloads *before* any tool code runs, and audits the
 | T12 | spoofed tenant/user/role headers, body fields, tool args → ignored/rejected | tests/security/test_spoofing.py | access unchanged, 0 extra reads |
 | T13 | agent token not bound to the task / bound to another task / other agent / other user → DENY | tests/security/test_agent_token_binding.py | 0 tool side effects |
 | T14 | confidential agent write without approval, replayed, tampered, wrong approver, expired, concurrent → DENY (one write only) | tests/security/test_approvals.py | `report_write` rows counted per attempt |
+| T15 | audit rows shipped to WORM store; deletes refused (incl. root); store and DB tampering, unshipped rows, PEP bypass detected | tests/security/test_audit_sink.py | object versions, findings by id, `document_read` row of the bypass |
 | + | audit secrecy (no tokens/canaries), audit UPDATE/DELETE denied, SQL metrics exact, MCP schema | tests/security, tests/integration | DB assertions |
 
 ## 8. Commands

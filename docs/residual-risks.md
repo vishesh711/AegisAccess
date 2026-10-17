@@ -7,7 +7,13 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 2. **Trusted agent host.** Agent tokens come from a user-consented token exchange and are bound to one
    task (ADR-2), so a stolen agent secret alone is useless. The process that performs the exchange and
    writes the binding (here, the API) is still trusted to bind the token to the task the user invoked.
-3. **Audit in the same database.** Superuser can disable the immutability trigger; no external WORM sink.
+3. **Audit copy is asynchronous.** The DB owner or a superuser can still disable the immutability trigger.
+   Every row is copied within seconds to the external WORM store (ADR-8), and later changes are
+   reported, but a row altered before its first copy is not. Anyone with access to the store's volume
+   or host bypasses its S3 API (the hash chain makes that visible). VersityGW's bucket *default*
+   retention could be shortened in testing, so safety relies on the per-object retention the shipper
+   sets and the verifier checks. Reconciliation is detective: it runs on demand (`make audit-verify`,
+   CI), with no alerting.
 4. **Local-demo IdP settings.** Keycloak `start-dev` (HTTP, H2), password grant for the CLI client,
    `sslRequired=none`. Not acceptable in production.
 5. **Logical MCP audience** (`aegis-mcp`) instead of an RFC 8707 resource URI (ADR-4).
@@ -33,4 +39,4 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 
 ## Deferred (Phase 2, per PRD §12)
 Go gateway; `act`-claim delegation chains; an approval UI; mTLS workload identity; risk-adaptive access / device posture; security dashboard;
-external audit sink; load testing with high-cardinality data.
+alerting on audit-verify findings; load testing with high-cardinality data.

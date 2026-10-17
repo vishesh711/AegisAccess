@@ -83,8 +83,8 @@ def _escape_like(value: str) -> str:
 
 _SIDE_EFFECT = """
 INSERT INTO resource_side_effects
-    (kind, tenant_id, resource_id, principal_id, agent_id, task_id, correlation_id)
-VALUES (%s, %s, %s, %s, %s, %s, %s)
+    (kind, tenant_id, resource_id, principal_id, agent_id, task_id, correlation_id, request_id)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -101,6 +101,7 @@ class DocumentStore:
         resource_id: str,
         principal_id: str,
         correlation_id: uuid.UUID,
+        request_id: uuid.UUID,
         agent_id: str | None = None,
         task_id: uuid.UUID | None = None,
     ) -> Document | None:
@@ -115,7 +116,16 @@ class DocumentStore:
                 return None
             await conn.execute(
                 _SIDE_EFFECT,
-                ("document_read", tenant_id, resource_id, principal_id, agent_id, task_id, correlation_id),
+                (
+                    "document_read",
+                    tenant_id,
+                    resource_id,
+                    principal_id,
+                    agent_id,
+                    task_id,
+                    correlation_id,
+                    request_id,
+                ),
             )
         return Document(
             id=row["id"], title=row["title"], body=row["body"], classification=row["classification"]
@@ -153,11 +163,13 @@ class DocumentStore:
         agent_id: str | None,
         task_id: uuid.UUID | None,
         correlation_id: uuid.UUID,
+        request_id: uuid.UUID,
     ) -> None:
         self.calls["search"] += 1
         async with tenant_transaction(self._pool, tenant_id) as conn:
             await conn.execute(
-                _SIDE_EFFECT, ("search", tenant_id, None, principal_id, agent_id, task_id, correlation_id)
+                _SIDE_EFFECT,
+                ("search", tenant_id, None, principal_id, agent_id, task_id, correlation_id, request_id),
             )
 
     async def create_report(
@@ -170,6 +182,7 @@ class DocumentStore:
         source_document_ids: list[str],
         summary_text: str,
         correlation_id: uuid.UUID,
+        request_id: uuid.UUID,
         consume_approval: tuple[uuid.UUID, str] | None = None,
     ) -> uuid.UUID:
         """Write a report. ``consume_approval`` = (approval id, args digest): the approval is consumed in the
@@ -196,6 +209,7 @@ class DocumentStore:
                     agent_id,
                     task_id,
                     correlation_id,
+                    request_id,
                 ),
             )
         return report_id
@@ -209,11 +223,21 @@ class DocumentStore:
         agent_id: str | None,
         task_id: uuid.UUID | None,
         correlation_id: uuid.UUID,
+        request_id: uuid.UUID,
     ) -> None:
         """Test-only stand-in for exfiltration. Performs NO network I/O; only records that it ran."""
         self.calls["simulate_export"] += 1
         async with tenant_transaction(self._pool, tenant_id) as conn:
             await conn.execute(
                 _SIDE_EFFECT,
-                ("export_simulated", tenant_id, resource_id, principal_id, agent_id, task_id, correlation_id),
+                (
+                    "export_simulated",
+                    tenant_id,
+                    resource_id,
+                    principal_id,
+                    agent_id,
+                    task_id,
+                    correlation_id,
+                    request_id,
+                ),
             )

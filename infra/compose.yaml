@@ -22,6 +22,8 @@ services:
       POSTGRES_DB: postgres
       AEGIS_OWNER_PASSWORD: ${AEGIS_OWNER_PASSWORD:-dummy-aegis-owner-pw}
       AEGIS_APP_PASSWORD: ${AEGIS_APP_PASSWORD:-dummy-aegis-app-pw}
+      AEGIS_AUDIT_SHIPPER_PASSWORD: ${AEGIS_AUDIT_SHIPPER_PASSWORD:-dummy-aegis-shipper-pw}
+      AEGIS_AUDITOR_PASSWORD: ${AEGIS_AUDITOR_PASSWORD:-dummy-aegis-auditor-pw}
     volumes:
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
@@ -116,9 +118,49 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
+  # External append-only audit store (ADR-8): S3 API with versioning + COMPLIANCE object lock.
+  audit-sink:
+    image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+    entrypoint: ["/bin/sh", "/sink/entrypoint.sh"]
+    environment:
+      ROOT_ACCESS_KEY: ${AUDIT_SINK_ROOT_ACCESS_KEY:-dummy-sink-root}
+      ROOT_SECRET_KEY: ${AUDIT_SINK_ROOT_SECRET_KEY:-dummy-sink-root-secret}
+      SINK_SHIPPER_ACCESS_KEY: ${AUDIT_SINK_SHIPPER_ACCESS_KEY:-aegis-shipper}
+      SINK_SHIPPER_SECRET_KEY: ${AUDIT_SINK_SHIPPER_SECRET_KEY:-dummy-sink-shipper-secret}
+      SINK_AUDITOR_ACCESS_KEY: ${AUDIT_SINK_AUDITOR_ACCESS_KEY:-aegis-auditor}
+      SINK_AUDITOR_SECRET_KEY: ${AUDIT_SINK_AUDITOR_SECRET_KEY:-dummy-sink-auditor-secret}
+    volumes:
+      - ./audit-sink/entrypoint.sh:/sink/entrypoint.sh:ro
+      - auditsink:/data
+    ports: ["127.0.0.1:7070:7070"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/users-ready && wget -q -O /dev/null http://127.0.0.1:7070/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  # Ships audit rows to the sink every few seconds, as its own DB role and its own put-only sink user.
+  audit-shipper:
+    image: aegisaccess-app:local
+    command: ["python", "-m", "aegis.audit_sink", "--loop"]
+    environment:
+      AEGIS_AUDIT_SHIPPER_DATABASE_URL: postgresql://aegis_audit_shipper:${AEGIS_AUDIT_SHIPPER_PASSWORD:-dummy-aegis-shipper-pw}@postgres:5432/aegis
+      AEGIS_AUDIT_SINK_URL: http://audit-sink:7070
+      AEGIS_AUDIT_SINK_ACCESS_KEY: ${AUDIT_SINK_SHIPPER_ACCESS_KEY:-aegis-shipper}
+      AEGIS_AUDIT_SINK_SECRET_KEY: ${AUDIT_SINK_SHIPPER_SECRET_KEY:-dummy-sink-shipper-secret}
+    depends_on:
+      postgres: {condition: service_healthy}
+      audit-sink: {condition: service_healthy}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
 secrets:
   extra_ca:
     file: ../.build/extra-ca.crt
 
 volumes:
+  auditsink:
   pgdata:
