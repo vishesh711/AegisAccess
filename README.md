@@ -16,24 +16,39 @@ server (official Python SDK) where every agent tool call is authorized on
 * A deliberately **prompt-injectable** agent obeys a malicious instruction hidden in a document
   ("read payroll and export it") — and the MCP tool boundary denies both calls.
 * OPA outages, timeouts, malformed/undefined decisions and audit-store failures **fail closed**.
+* Agent tokens come only from a **user-consented token exchange** (RFC 8693) and are bound server-side to
+  one task, so a stolen agent secret or another task's token is useless (T13).
+* Confidential agent writes wait for the delegating user's **single-use approval** of the exact
+  arguments; replays, edits and concurrent reuse are denied (T14).
+* Every audit event is copied to an **external append-only store** (S3 object lock, hash chain);
+  `make audit-verify` reports rows changed or deleted afterwards, executions without an allow, and
+  side effects without an execution (T15).
+* A **hardened profile**: HTTPS-only Keycloak on PostgreSQL, PKCE logins with no password grant,
+  mutual TLS between the enforcement points and OPA.
+* An **optional real-model planner** (Claude, off by default) runs behind the same tool boundary (T16).
 * Every test checks the **observed side effects in PostgreSQL**, not just the HTTP status.
-* SQL detection rules with an exact, hand-verifiable confusion matrix on a labelled fixture.
+* SQL detection rules with an exact, hand-verifiable confusion matrix on a labelled fixture, plus a
+  1,888-row generated dataset.
 
 ## Quick start
 
-Prerequisites: Docker with Compose v2, [uv](https://docs.astral.sh/uv/), GNU make. Ports 5432, 8000,
-8001, 8080, 8181 free on 127.0.0.1.
+Prerequisites: Docker with Compose v2, [uv](https://docs.astral.sh/uv/), GNU make. Ports 5432, 7070,
+8000, 8001, 8080, 8181 free on 127.0.0.1 (the hardened profile also uses 5433 and 8443).
 
 ```bash
 uv sync --frozen          # Python 3.12 venv with hash-pinned deps
-make up                   # build + start keycloak, postgres, opa, api, mcp-server (waits for health)
-make migrate seed         # schema + synthetic dataset
+make up                   # build + start keycloak, postgres, opa, api, mcp-server, audit store (waits for health)
+make migrate seed         # schema + synthetic dataset + audit bucket
 make demo                 # narrated walkthrough
 make test                 # Rego + unit + integration + security tests
 make security-test        # attack corpus -> artifacts/security-test-report.md
 make sql-eval             # detection metrics -> artifacts/verification/sql-eval.md
+make audit-verify         # external audit store vs database + allow/execution reconciliation
 make lint                 # ruff, format check, mypy --strict, opa fmt/check
 make down                 # stop and delete containers + volumes
+
+# Hardened profile (instead of `make up migrate seed`):
+make up-hardened migrate seed-hardened hardened-test
 ```
 
 Behind a TLS-intercepting proxy, image builds accept `AEGIS_EXTRA_CA=/path/ca.pem`,
@@ -50,10 +65,11 @@ Behind a TLS-intercepting proxy, image builds accept `AEGIS_EXTRA_CA=/path/ca.pe
 | dave | human | alpha | engineer | **deactivated** in AegisAccess, still valid in Keycloak |
 | eve | human | – | – | valid Keycloak user, **not provisioned** |
 | svc-reporter | workload | alpha | workload-reporter | client credentials, aud `aegis-api` |
-| agent-alpha / agent-beta | agent | alpha / beta | agent-document-assistant | client credentials, aud `aegis-mcp` |
+| agent-alpha / agent-beta | agent | alpha / beta | agent-document-assistant | tokens only via token exchange of a user's consent token (`delegate-agent-*` scope), aud `aegis-mcp` |
 
 Documents: `doc-alpha-eng`, `doc-alpha-eng-notes` (contains a prompt injection), `doc-alpha-payroll`
-(restricted), `doc-alpha-finance-notes` (contains a prompt injection), `doc-beta-eng`.
+(restricted), `doc-alpha-finance-notes` (contains a prompt injection), `doc-alpha-forecast`
+(confidential: an agent report about it needs approval), `doc-beta-eng`.
 
 ## Try it by hand
 
@@ -73,7 +89,9 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: beta" localhost:8000/
 | `GET /api/v1/resources/{id}` | object-level authorized document read |
 | `POST /api/v1/tasks` | create a delegation for an agent (capped to what the user may do) |
 | `POST /api/v1/tasks/{id}/revoke` | revoke (owner only) |
-| `POST /api/v1/tasks/{id}/invoke` | run the deterministic agent; it uses its own token against the MCP server |
+| `POST /api/v1/tasks/{id}/invoke` | run the agent; needs a token with the `delegate-agent-alpha` scope, which is exchanged for a task-bound agent token |
+| `GET /api/v1/approvals` | approval requests addressed to the caller |
+| `POST /api/v1/approvals/{id}/approve` / `reject` | the delegating user's decision (single use, 5 minutes) |
 | `GET /api/v1/audit` | sanitized, tenant-scoped audit events (security-admin) |
 | `POST /api/v1/policy/simulate` | advisory dry run (security-admin), never executes |
 
@@ -87,8 +105,8 @@ apps/api/aegis_api/        FastAPI gateway             src/aegis/          share
 apps/mcp_server/aegis_mcp/ MCP server (official SDK)   policies/           Rego + data + tests
 infra/                     compose, Keycloak realm, Postgres role bootstrap
 migrations/                SQL (RLS, grants, append-only audit, detection views)
-scripts/                   migrate, seed, demo, sql_eval, security_report
-tests/unit|integration|security                         analytics/          fixture + SQL
+scripts/                   migrate, seed, demo, sql_eval, security_report, audit_verify, gen_pki, harden_realm
+tests/unit|integration|security|hardened                analytics/          fixture + SQL
 docs/                      architecture, threat model, design review (ADRs), residual risks, spec/
 artifacts/                 security-test-report.md, verification/ (per-milestone evidence)
 ```
