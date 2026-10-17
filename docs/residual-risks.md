@@ -15,10 +15,13 @@ What the MVP does **not** protect against, or only partially. Honest list, not a
 8. **Side channels** (timing of cross-tenant vs nonexistent ids, search timing) not evaluated.
 9. **Model output integrity**: an agent can still produce a misleading summary from in-scope content;
    only *access* is controlled.
-10. **Detection metrics** are computed on a 33-row hand-labelled synthetic fixture; they say nothing
-    about real-world performance.
-11. **GitHub Actions** are pinned by version tag, not commit SHA (SHAs were not verifiable offline here).
-12. **Container scan** in CI is report-only: findings are reported but do not fail the build.
+10. **Detection metrics** come from synthetic data: a 33-row hand-labelled fixture and a 1,888-row generated
+    day (`scripts/gen_detection_dataset.py`). They say nothing about real-world performance. The larger set
+    shows rule R2 misfiring on benign agent search filtering (30 false alarms): the rule needs to exclude
+    `documents:search`, which is deliberately not tuned against the same data it is measured on.
+11. **GitHub Actions** are pinned to commit SHAs; updating them is a manual step (no Dependabot configured).
+12. **Container scan** fails the build only on fixable CRITICAL findings; HIGH findings (44 on the last
+    scan, all in the Debian base image) are reported, not blocking.
 13. **Single-use approval workflow** (MCP_SPEC approval rule, PRD replay scenario P1) is not implemented,
     so no tool requires approval and no approval can be replayed.
 14. **Caller-supplied correlation id.** The MCP server accepts `Aegis-Correlation-Id` (UUID-validated) so an

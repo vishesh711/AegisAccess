@@ -108,18 +108,19 @@ def policy_digest() -> str:
     return h.hexdigest()
 
 
+DETECTION_DATASETS = {"fixture": "detection_fixture.csv", "large": "detection_large.csv"}
+
+
 def load_detection_fixture(conn: psycopg.Connection) -> int:
-    path = ROOT / "analytics" / "detection_fixture.csv"
-    if not path.exists():
-        return 0
+    """Load every labelled dataset (hand-labelled fixture + generated large set)."""
     conn.execute("DELETE FROM detection_events")
     n = 0
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            conn.execute(
-                "INSERT INTO detection_events (event_id, event_time, principal_id, principal_type, subject_tenant,"
-                " resource_tenant, action, tool_name, decision, reason_code, policy_version, authz_allowed,"
-                " ground_truth_is_attack) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+    for dataset, name in DETECTION_DATASETS.items():
+        path = ROOT / "analytics" / name
+        if not path.exists():
+            continue
+        with path.open(newline="") as f, conn.cursor() as cur:
+            rows = [
                 (
                     row["event_id"],
                     row["event_time"],
@@ -134,9 +135,17 @@ def load_detection_fixture(conn: psycopg.Connection) -> int:
                     row["policy_version"],
                     row["decision"] == "allow",
                     row["ground_truth_is_attack"] == "true",
-                ),
+                    dataset,
+                )
+                for row in csv.DictReader(f)
+            ]
+            cur.executemany(
+                "INSERT INTO detection_events (event_id, event_time, principal_id, principal_type, subject_tenant,"
+                " resource_tenant, action, tool_name, decision, reason_code, policy_version, authz_allowed,"
+                " ground_truth_is_attack, dataset) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                rows,
             )
-            n += 1
+            n += len(rows)
     return n
 
 

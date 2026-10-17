@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv sync --frozen
       - name: ruff, format, mypy, opa fmt/check
         run: make lint
@@ -29,8 +29,8 @@ jobs:
     timeout-minutes: 30
     needs: lint
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv sync --frozen
       - name: Start stack (keycloak, postgres, opa, api, mcp-server)
         run: make up
@@ -41,14 +41,19 @@ jobs:
         run: make security-test
       - run: make sql-eval
       - run: make demo
-      - name: Container image scan (report only)
+      - name: Container image scan - fail on fixable CRITICAL
         run: >
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
           aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
-          image --severity CRITICAL,HIGH --exit-code 0 --no-progress aegisaccess-app:local
+          image --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress aegisaccess-app:local
+      - name: Container image scan - HIGH findings (report only)
+        run: >
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
+          image --severity HIGH --exit-code 0 --no-progress aegisaccess-app:local
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: security-reports
           path: |
