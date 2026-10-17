@@ -18,7 +18,7 @@ validated identity and policy permissions, even when the agent is fed malicious 
 | Code | MVP merged via PR #1–#3; additions on branch `claude/beautiful-mccarthy-fcfdth` | about 12,000 lines across 121 files |
 | Attack scenarios T01–T16 | All pass | [`artifacts/security-test-report.md`](../artifacts/security-test-report.md): 39 scenarios, 0 mismatches |
 | Full test suite | 53 policy tests + 174 Python tests (67 unit, 22 integration, 85 security) + 8 hardened-profile tests | clean-start local run on 2026-10-17 |
-| GitHub CI | lint, security and hardened jobs | the hardened job is new; see section 10 |
+| GitHub CI | lint, security and hardened jobs, green on the branch | Actions runs 12–15; see section 10 |
 | Documentation | Architecture, STRIDE threat model (28 threats), 10 design decisions, residual risks | [`docs/`](.) |
 | Not verified | The optional real-model planner was never called against the real Anthropic API | [`BLOCKERS.md`](../BLOCKERS.md) |
 | Not built (by choice) | Scenario HTTP endpoint (replaced by `make security-test`) | ADR-5 |
@@ -359,6 +359,7 @@ CI has three jobs, all with actions pinned to commit SHAs:
 
 | Time (UTC, 2026-10-17) | Event | Result |
 | --- | --- | --- |
+| 01:07 | Branch CI run 15 (hardened profile commit) | Passed: lint, security and the new hardened job |
 | 01:10 | Clean-start local run of the default profile, after all six additions | Lint, 53 policy tests, 174 Python tests, 39 scenarios (0 mismatches), SQL evaluation, demo, audit verification (0 findings) and pip-audit all passed |
 | 00:58 | Clean-start local run of the hardened profile | 8 of 8 hardened tests passed |
 
